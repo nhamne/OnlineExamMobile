@@ -5,6 +5,7 @@ import LoginScreen from '../screens/auth/LoginScreen';
 import RegisterScreen from '../screens/auth/RegisterScreen';
 import TeacherDashboardScreen from '../screens/dashboard/TeacherDashboardScreen';
 import StudentDashboardScreen from '../screens/dashboard/StudentDashboardScreen';
+import ClassScreen from '../screens/teacher/ClassScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -23,6 +24,11 @@ const AppNavigator = ({ initialRouteName = 'Login', initialUser = null }) => {
 				<Stack.Screen
 					name="TeacherDashboard"
 					component={TeacherDashboardScreen}
+					initialParams={{ user: initialUser }}
+				/>
+				<Stack.Screen
+					name="TeacherClassrooms"
+					component={ClassScreen}
 					initialParams={{ user: initialUser }}
 				/>
 				<Stack.Screen

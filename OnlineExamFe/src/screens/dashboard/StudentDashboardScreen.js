@@ -260,7 +260,7 @@ const StudentDashboardScreen = ({ route, navigation }) => {
   return (
     <SafeAreaView
       className="flex-1 bg-surface-container-low"
-      style={Platform.OS === 'web' ? { height: '100vh' } : {}}
+      style={Platform.OS === 'web' ? { height: '100vh', overflow: 'hidden' } : {}}
     >
       <DashboardTopBar
         searchText={searchText}

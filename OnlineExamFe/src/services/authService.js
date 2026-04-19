@@ -31,6 +31,30 @@ export async function getTeacherDashboard(userId) {
   return response.data;
 }
 
+export async function getTeacherClassrooms(userId) {
+  try {
+    const response = await api.get(`/api/dashboard/teacher/${userId}/classrooms`);
+    return response.data;
+  } catch (error) {
+    // Backward compatibility: older backend may not expose /classrooms route yet.
+    const status = error?.response?.status;
+    const legacyHtmlNotFound =
+      typeof error?.response?.data === 'string' && error.response.data.includes('Cannot GET');
+
+    if (status === 404 || legacyHtmlNotFound) {
+      const fallbackResponse = await api.get(`/api/dashboard/teacher/${userId}`);
+      return {
+        teacher: fallbackResponse?.data?.teacher || null,
+        classrooms: Array.isArray(fallbackResponse?.data?.classrooms)
+          ? fallbackResponse.data.classrooms
+          : [],
+      };
+    }
+
+    throw error;
+  }
+}
+
 export async function getStudentDashboard(userId) {
   const response = await api.get(`/api/dashboard/student/${userId}`);
   return response.data;

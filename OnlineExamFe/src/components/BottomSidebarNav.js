@@ -5,12 +5,8 @@ import { MaterialIcons } from '@expo/vector-icons';
 const BottomSidebarNav = ({ items, activeKey, onSelect }) => {
   return (
     <View
-      pointerEvents="box-none"
       style={{
-        position: 'absolute',
-        left: 0,
-        right: 0,
-        bottom: 0,
+        width: '100%',
         borderTopLeftRadius: 18,
         borderTopRightRadius: 18,
         backgroundColor: '#FFFFFF',
@@ -23,7 +19,7 @@ const BottomSidebarNav = ({ items, activeKey, onSelect }) => {
         elevation: 8,
       }}
     >
-      <View pointerEvents="auto" style={{ width: '100%', paddingHorizontal: 8, paddingVertical: 8 }}>
+      <View style={{ width: '100%', paddingHorizontal: 8, paddingVertical: 8 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
           {items.map((item) => {
             const isActive = item.key === activeKey;

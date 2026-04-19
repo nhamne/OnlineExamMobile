@@ -10,8 +10,7 @@ import {
   View,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import BottomSidebarNav from '../../components/BottomSidebarNav';
-import DashboardTopBar from '../../components/DashboardTopBar';
+import TeacherScreenShell from '../../components/TeacherScreenShell';
 import { useToast } from '../../context/ToastContext';
 import { clearAuthSession } from '../../services/authSession';
 import { getTeacherDashboard } from '../../services/authService';
@@ -64,9 +63,15 @@ const getSessionStatus = (session) => {
 const TeacherDashboardScreen = ({ route, navigation }) => {
   const { showToast } = useToast();
   const user = route?.params?.user || null;
+  const initialTab = route?.params?.initialTab;
+
+  const getStartingTab = () => {
+    const allowedTabs = new Set(['home', 'exams', 'sessions', 'profile']);
+    return allowedTabs.has(initialTab) ? initialTab : 'home';
+  };
 
   const [searchText, setSearchText] = useState('');
-  const [activeTab, setActiveTab] = useState('home');
+  const [activeTab, setActiveTab] = useState(getStartingTab());
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
@@ -128,6 +133,11 @@ const TeacherDashboardScreen = ({ route, navigation }) => {
   }, [loadData]);
 
   const onPressBottomNav = (item) => {
+    if (item.key === 'classes') {
+      navigation.replace('TeacherClassrooms', { user: displayTeacher || user });
+      return;
+    }
+
     setActiveTab(item.key);
   };
 
@@ -215,40 +225,40 @@ const TeacherDashboardScreen = ({ route, navigation }) => {
     const classroomsToRender = compact ? filteredClassrooms.slice(0, 3) : filteredClassrooms;
 
     return (
-    <View className="mb-10">
-      <Text className="text-xl font-bold text-on-surface mb-4">Lớp học gần đây</Text>
-      <View className="flex-col">
-        {classroomsToRender.length > 0 ? (
-          classroomsToRender.map((item) => (
-            <View
-              key={item.Id}
-              style={ambientShadow}
-              className="bg-surface-container-lowest p-4 rounded-xl mb-3"
-            >
-              <Text className="font-bold text-on-surface text-base" numberOfLines={1}>
-                {item.ClassName}
-              </Text>
-              <Text className="text-xs text-on-surface-variant mt-1" numberOfLines={1}>
-                {item.StudentCount ?? 0} học sinh
-              </Text>
+      <View className="mb-10">
+        <Text className="text-xl font-bold text-on-surface mb-4">Lớp học gần đây</Text>
+        <View className="flex-col">
+          {classroomsToRender.length > 0 ? (
+            classroomsToRender.map((item) => (
+              <View
+                key={item.Id}
+                style={ambientShadow}
+                className="bg-surface-container-lowest p-4 rounded-xl mb-3"
+              >
+                <Text className="font-bold text-on-surface text-base" numberOfLines={1}>
+                  {item.ClassName}
+                </Text>
+                <Text className="text-xs text-on-surface-variant mt-1" numberOfLines={1}>
+                  {item.StudentCount ?? 0} học sinh
+                </Text>
+              </View>
+            ))
+          ) : (
+            <View className="p-4 rounded-xl border border-dashed border-outline-variant/60 bg-surface-container-high/40">
+              <Text className="text-sm text-on-surface-variant text-center">Không có lớp học phù hợp.</Text>
             </View>
-          ))
-        ) : (
-          <View className="p-4 rounded-xl border border-dashed border-outline-variant/60 bg-surface-container-high/40">
-            <Text className="text-sm text-on-surface-variant text-center">Không có lớp học phù hợp.</Text>
-          </View>
-        )}
+          )}
 
-        {compact && filteredClassrooms.length > 3 && showAllButton ? (
-          <TouchableOpacity
-            className="mt-1 items-center justify-center rounded-xl border border-primary/20 bg-primary/5 py-3"
-            onPress={() => setActiveTab('classes')}
-          >
-            <Text className="text-primary font-bold">Xem tất cả</Text>
-          </TouchableOpacity>
-        ) : null}
+          {compact && filteredClassrooms.length > 3 && showAllButton ? (
+            <TouchableOpacity
+              className="mt-1 items-center justify-center rounded-xl border border-primary/20 bg-primary/5 py-3"
+              onPress={() => navigation.navigate('TeacherClassrooms', { user: displayTeacher || user })}
+            >
+              <Text className="text-primary font-bold">Xem tất cả</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
       </View>
-    </View>
     );
   };
 
@@ -293,57 +303,57 @@ const TeacherDashboardScreen = ({ route, navigation }) => {
     const sessionsToRender = compact ? filteredSessions.slice(0, 5) : filteredSessions;
 
     return (
-    <View className="mb-6">
-      <View className="flex-row items-center justify-between mb-4">
-        <Text className="text-xl font-bold text-on-surface">Các ca thi gần đây</Text>
-        {compact && filteredSessions.length > 5 && showAllInline ? (
-          <TouchableOpacity onPress={() => setActiveTab('sessions')}>
-            <Text className="text-primary font-bold">Xem tất cả</Text>
-          </TouchableOpacity>
-        ) : null}
-      </View>
-      <View className="flex-col gap-3">
-        {sessionsToRender.length > 0 ? (
-          sessionsToRender.map((item) => {
-            const status = getSessionStatus(item);
+      <View className="mb-6">
+        <View className="flex-row items-center justify-between mb-4">
+          <Text className="text-xl font-bold text-on-surface">Các ca thi gần đây</Text>
+          {compact && filteredSessions.length > 5 && showAllInline ? (
+            <TouchableOpacity onPress={() => setActiveTab('sessions')}>
+              <Text className="text-primary font-bold">Xem tất cả</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
+        <View className="flex-col gap-3">
+          {sessionsToRender.length > 0 ? (
+            sessionsToRender.map((item) => {
+              const status = getSessionStatus(item);
 
-            return (
-              <View
-                key={item.Id}
-                style={ambientShadow}
-                className="bg-surface-container-lowest p-4 rounded-xl flex-row items-center justify-between"
-              >
-                <View className="flex-row items-center gap-4 flex-1 min-w-0">
-                  <View className="w-12 h-12 rounded-lg bg-slate-100 flex items-center justify-center">
-                    <MaterialIcons name="event-available" size={24} color="#414754" />
+              return (
+                <View
+                  key={item.Id}
+                  style={ambientShadow}
+                  className="bg-surface-container-lowest p-4 rounded-xl flex-row items-center justify-between"
+                >
+                  <View className="flex-row items-center gap-4 flex-1 min-w-0">
+                    <View className="w-12 h-12 rounded-lg bg-slate-100 flex items-center justify-center">
+                      <MaterialIcons name="event-available" size={24} color="#414754" />
+                    </View>
+                    <View className="flex-1 min-w-0 pr-2">
+                      <Text className="font-bold text-on-surface text-base" numberOfLines={1}>
+                        {item.SessionName}
+                      </Text>
+                      <Text className="text-xs text-on-surface-variant" numberOfLines={1}>
+                        {item.ClassName} - {item.ExamTitle}
+                      </Text>
+                      <Text className="text-xs text-on-surface-variant mt-1">
+                        {formatDateTime(item.StartTime)}
+                      </Text>
+                    </View>
                   </View>
-                  <View className="flex-1 min-w-0 pr-2">
-                    <Text className="font-bold text-on-surface text-base" numberOfLines={1}>
-                      {item.SessionName}
-                    </Text>
-                    <Text className="text-xs text-on-surface-variant" numberOfLines={1}>
-                      {item.ClassName} - {item.ExamTitle}
-                    </Text>
-                    <Text className="text-xs text-on-surface-variant mt-1">
-                      {formatDateTime(item.StartTime)}
+                  <View className={`${status.bgClass} px-2 py-1 rounded-full`}>
+                    <Text className={`${status.textClass} text-[10px] font-bold uppercase`}>
+                      {status.label}
                     </Text>
                   </View>
                 </View>
-                <View className={`${status.bgClass} px-2 py-1 rounded-full`}>
-                  <Text className={`${status.textClass} text-[10px] font-bold uppercase`}>
-                    {status.label}
-                  </Text>
-                </View>
-              </View>
-            );
-          })
-        ) : (
-          <View className="p-4 rounded-xl border border-dashed border-outline-variant/60 bg-surface-container-high/40">
-            <Text className="text-sm text-on-surface-variant text-center">Không có ca thi phù hợp.</Text>
-          </View>
-        )}
+              );
+            })
+          ) : (
+            <View className="p-4 rounded-xl border border-dashed border-outline-variant/60 bg-surface-container-high/40">
+              <Text className="text-sm text-on-surface-variant text-center">Không có ca thi phù hợp.</Text>
+            </View>
+          )}
+        </View>
       </View>
-    </View>
     );
   };
 
@@ -373,7 +383,6 @@ const TeacherDashboardScreen = ({ route, navigation }) => {
   );
 
   const renderContentByTab = () => {
-    if (activeTab === 'classes') return renderClassrooms();
     if (activeTab === 'exams') return renderExamPapers();
     if (activeTab === 'sessions') return renderSessions();
     if (activeTab === 'profile') return renderProfile();
@@ -389,41 +398,50 @@ const TeacherDashboardScreen = ({ route, navigation }) => {
 
   if (loading) {
     return (
-      <SafeAreaView className="flex-1 items-center justify-center bg-surface-container-low">
-        <ActivityIndicator size="large" color="#005bbf" />
-        <Text className="mt-3 text-on-surface-variant">Đang tải dashboard giáo viên...</Text>
-      </SafeAreaView>
-    );
-  }
-
-  return (
-    <SafeAreaView
-      className="flex-1 bg-surface-container-low"
-      style={Platform.OS === 'web' ? { height: '100vh' } : {}}
-    >
-      <DashboardTopBar
+      <TeacherScreenShell
+        bottomNavItems={bottomNavItems}
+        activeKey="home"
+        onSelectBottomNav={onPressBottomNav}
         searchText={searchText}
         onChangeSearch={setSearchText}
         upcomingCount={summary?.UpcomingSessionCount}
         initials={initials}
         onPressAvatar={onPressAvatar}
-      />
+      >
+        <View className="flex-1 items-center justify-center px-4" style={{ minHeight: 0 }}>
+          <ActivityIndicator size="large" color="#005bbf" />
+          <Text className="mt-3 text-on-surface-variant">Đang tải dashboard giáo viên...</Text>
+        </View>
+      </TeacherScreenShell>
+    );
+  }
 
+  return (
+    <TeacherScreenShell
+      bottomNavItems={bottomNavItems}
+      activeKey={activeTab}
+      onSelectBottomNav={onPressBottomNav}
+      searchText={searchText}
+      onChangeSearch={setSearchText}
+      upcomingCount={summary?.UpcomingSessionCount}
+      initials={initials}
+      onPressAvatar={onPressAvatar}
+    >
       <ScrollView
-        style={{ flex: 1 }}
+        style={{ flex: 1, minHeight: 0 }}
         className="px-4"
         showsVerticalScrollIndicator={true}
         keyboardShouldPersistTaps="handled"
-        contentContainerStyle={{ paddingTop: 0, paddingBottom: 80 }}
+        contentContainerStyle={{ paddingTop: 0, paddingBottom: 24 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
         <View className="mb-8">
-          <Text className="mt-6 text-on-surface-variant font-medium text-xs tracking-widest uppercase mb-1">
+          <Text className="mt-6 text-primary text-2xl font-bold tracking-tight mb-1">
             {activeTab === 'home'
               ? 'Tổng quan'
               : activeTab === 'profile'
-              ? 'Thông tin tài khoản'
-              : bottomNavItems.find((i) => i.key === activeTab)?.label}
+                ? 'Thông tin tài khoản'
+                : bottomNavItems.find((i) => i.key === activeTab)?.label}
           </Text>
           <Text className="text-3xl font-semibold text-on-surface tracking-tight leading-tight" numberOfLines={2}>
             Chào mừng trở lại,{"\n"}{displayTeacher?.fullName || 'Giáo viên'}!
@@ -438,9 +456,7 @@ const TeacherDashboardScreen = ({ route, navigation }) => {
 
         {renderContentByTab()}
       </ScrollView>
-
-      <BottomSidebarNav items={bottomNavItems} activeKey={activeTab} onSelect={onPressBottomNav} />
-    </SafeAreaView>
+    </TeacherScreenShell>
   );
 };
 

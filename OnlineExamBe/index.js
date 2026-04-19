@@ -347,6 +347,57 @@ app.get('/api/dashboard/teacher/:userId', async (req, res) => {
   }
 });
 
+app.get('/api/dashboard/teacher/:userId/classrooms', async (req, res) => {
+  try {
+    const userId = Number(req.params.userId);
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({ message: 'Invalid userId.' });
+    }
+
+    const pool = await getPool();
+
+    const teacherCheck = await pool
+      .request()
+      .input('teacherId', sql.Int, userId)
+      .query(`
+        SELECT TOP 1 Id, FullName, Email, Role, IsActive
+        FROM Users
+        WHERE Id = @teacherId AND Role = 'Teacher'
+      `);
+
+    if (teacherCheck.recordset.length === 0) {
+      return res.status(404).json({ message: 'Teacher not found.' });
+    }
+
+    const classroomsResult = await pool
+      .request()
+      .input('teacherId', sql.Int, userId)
+      .query(`
+        SELECT
+          c.Id,
+          c.ClassName,
+          c.JoinCode,
+          c.TeacherId,
+          u.FullName AS TeacherName,
+          u.Email AS TeacherEmail,
+          c.CreatedAt,
+          c.IsDeleted,
+          (SELECT COUNT(*) FROM ClassroomMembers cm WHERE cm.ClassroomId = c.Id) AS StudentCount
+        FROM Classrooms c
+        INNER JOIN Users u ON u.Id = c.TeacherId
+        WHERE c.TeacherId = @teacherId
+        ORDER BY c.IsDeleted ASC, c.CreatedAt DESC, c.Id DESC
+      `);
+
+    return res.json({
+      teacher: sanitizeUser(teacherCheck.recordset[0]),
+      classrooms: classroomsResult.recordset,
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
 app.get('/api/dashboard/student/:userId', async (req, res) => {
   try {
     const userId = Number(req.params.userId);
