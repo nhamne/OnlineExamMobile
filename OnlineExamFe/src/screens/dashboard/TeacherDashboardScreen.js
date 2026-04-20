@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
   Platform,
   RefreshControl,
   SafeAreaView,
@@ -36,6 +37,13 @@ const formatDateTime = (value) => {
   });
 };
 
+const SESSION_STATUS_STYLES = {
+  'Sắp diễn ra': { bg: '#dbeafe', text: '#1d4ed8' },
+  'Đã kết thúc': { bg: '#e0e2ec', text: '#414754' },
+  'Đang diễn ra': { bg: '#ffedd5', text: '#c2410c' },
+  'Không xác định': { bg: '#f1f5f9', text: '#475569' },
+};
+
 const getSessionStatus = (session) => {
   const now = new Date();
   const start = new Date(session.StartTime);
@@ -46,18 +54,14 @@ const getSessionStatus = (session) => {
   }
 
   if (now < start) {
-    return { label: 'Sắp diễn ra', bgClass: 'bg-blue-100', textClass: 'text-blue-700' };
+    return { label: 'Sắp diễn ra' };
   }
 
   if (now > end) {
-    return {
-      label: 'Đã kết thúc',
-      bgClass: 'bg-surface-container-highest',
-      textClass: 'text-on-surface-variant',
-    };
+    return { label: 'Đã kết thúc' };
   }
 
-  return { label: 'Đang diễn ra', bgClass: 'bg-orange-100', textClass: 'text-orange-700' };
+  return { label: 'Đang diễn ra' };
 };
 
 const TeacherDashboardScreen = ({ route, navigation }) => {
@@ -80,6 +84,7 @@ const TeacherDashboardScreen = ({ route, navigation }) => {
   const [classrooms, setClassrooms] = useState([]);
   const [examPapers, setExamPapers] = useState([]);
   const [sessions, setSessions] = useState([]);
+  const bodyOpacity = React.useRef(new Animated.Value(1)).current;
 
   const ambientShadow = {
     shadowColor: '#191c23',
@@ -126,6 +131,15 @@ const TeacherDashboardScreen = ({ route, navigation }) => {
     })();
   }, [loadData]);
 
+  useEffect(() => {
+    bodyOpacity.setValue(0.94);
+    Animated.timing(bodyOpacity, {
+      toValue: 1,
+      duration: 170,
+      useNativeDriver: true,
+    }).start();
+  }, [activeTab, bodyOpacity]);
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await loadData();
@@ -135,6 +149,11 @@ const TeacherDashboardScreen = ({ route, navigation }) => {
   const onPressBottomNav = (item) => {
     if (item.key === 'classes') {
       navigation.replace('TeacherClassrooms', { user: displayTeacher || user });
+      return;
+    }
+
+    if (item.key === 'sessions') {
+      navigation.replace('TeacherSessions', { user: displayTeacher || user });
       return;
     }
 
@@ -244,14 +263,15 @@ const TeacherDashboardScreen = ({ route, navigation }) => {
               </View>
             ))
           ) : (
-            <View className="p-4 rounded-xl border border-dashed border-outline-variant/60 bg-surface-container-high/40">
+            <View className="p-4 rounded-xl border border-dashed bg-surface-container-high" style={{ borderColor: '#c1c6d699', backgroundColor: '#e6e8f266' }}>
               <Text className="text-sm text-on-surface-variant text-center">Không có lớp học phù hợp.</Text>
             </View>
           )}
 
           {compact && filteredClassrooms.length > 3 && showAllButton ? (
             <TouchableOpacity
-              className="mt-1 items-center justify-center rounded-xl border border-primary/20 bg-primary/5 py-3"
+              className="mt-1 items-center justify-center rounded-xl border py-3"
+              style={{ borderColor: '#005bbf33', backgroundColor: '#005bbf0d' }}
               onPress={() => navigation.navigate('TeacherClassrooms', { user: displayTeacher || user })}
             >
               <Text className="text-primary font-bold">Xem tất cả</Text>
@@ -290,7 +310,7 @@ const TeacherDashboardScreen = ({ route, navigation }) => {
             </View>
           ))
         ) : (
-          <View className="p-4 rounded-xl border border-dashed border-outline-variant/60 bg-surface-container-high/40">
+          <View className="p-4 rounded-xl border border-dashed bg-surface-container-high" style={{ borderColor: '#c1c6d699', backgroundColor: '#e6e8f266' }}>
             <Text className="text-sm text-on-surface-variant text-center">Không có đề thi phù hợp.</Text>
           </View>
         )}
@@ -316,6 +336,7 @@ const TeacherDashboardScreen = ({ route, navigation }) => {
           {sessionsToRender.length > 0 ? (
             sessionsToRender.map((item) => {
               const status = getSessionStatus(item);
+              const statusStyle = SESSION_STATUS_STYLES[status.label] || SESSION_STATUS_STYLES['Không xác định'];
 
               return (
                 <View
@@ -339,8 +360,8 @@ const TeacherDashboardScreen = ({ route, navigation }) => {
                       </Text>
                     </View>
                   </View>
-                  <View className={`${status.bgClass} px-2 py-1 rounded-full`}>
-                    <Text className={`${status.textClass} text-[10px] font-bold uppercase`}>
+                  <View style={{ backgroundColor: statusStyle.bg, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999 }}>
+                    <Text style={{ color: statusStyle.text, fontSize: 10, fontWeight: '700', textTransform: 'uppercase' }}>
                       {status.label}
                     </Text>
                   </View>
@@ -348,7 +369,7 @@ const TeacherDashboardScreen = ({ route, navigation }) => {
               );
             })
           ) : (
-            <View className="p-4 rounded-xl border border-dashed border-outline-variant/60 bg-surface-container-high/40">
+            <View className="p-4 rounded-xl border border-dashed bg-surface-container-high" style={{ borderColor: '#c1c6d699', backgroundColor: '#e6e8f266' }}>
               <Text className="text-sm text-on-surface-variant text-center">Không có ca thi phù hợp.</Text>
             </View>
           )}
@@ -454,7 +475,9 @@ const TeacherDashboardScreen = ({ route, navigation }) => {
           </View>
         ) : null}
 
-        {renderContentByTab()}
+        <Animated.View style={{ opacity: bodyOpacity }}>
+          {renderContentByTab()}
+        </Animated.View>
       </ScrollView>
     </TeacherScreenShell>
   );

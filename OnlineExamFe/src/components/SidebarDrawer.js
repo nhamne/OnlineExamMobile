@@ -81,9 +81,8 @@ const SidebarDrawer = ({
                 <TouchableOpacity
                   key={item.key}
                   onPress={() => onSelect(item)}
-                  className={`flex-row items-center rounded-xl px-3 h-11 ${
-                    isActive ? 'bg-primary' : 'bg-transparent'
-                  }`}
+                  className="flex-row items-center rounded-xl px-3 h-11"
+                  style={{ backgroundColor: isActive ? '#005bbf' : 'transparent' }}
                   activeOpacity={0.88}
                 >
                   <MaterialIcons
@@ -92,9 +91,8 @@ const SidebarDrawer = ({
                     color={isActive ? '#FFFFFF' : '#334155'}
                   />
                   <Text
-                    className={`ml-3 text-base font-semibold ${
-                      isActive ? 'text-white' : 'text-slate-800'
-                    }`}
+                    className="ml-3 text-base font-semibold"
+                    style={{ color: isActive ? '#FFFFFF' : '#1e293b' }}
                   >
                     {item.label}
                   </Text>

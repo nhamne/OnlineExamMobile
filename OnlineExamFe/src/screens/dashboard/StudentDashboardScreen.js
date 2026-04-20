@@ -3,12 +3,12 @@ import {
   ActivityIndicator,
   Platform,
   RefreshControl,
-  SafeAreaView,
   ScrollView,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { getStudentDashboard } from '../../services/authService';
 import BottomSidebarNav from '../../components/BottomSidebarNav';
@@ -24,13 +24,16 @@ const studentMenuItems = [
 ];
 
 const StatCard = ({ icon, label, value, tone = 'default' }) => {
-  const toneClasses =
-    tone === 'highlight'
-      ? 'bg-blue-50 border-blue-200'
-      : 'bg-surface-container-lowest border-outline-variant/30';
+  const isHighlight = tone === 'highlight';
 
   return (
-    <View className={`flex-1 rounded-2xl border p-4 ${toneClasses}`}>
+    <View
+      className="flex-1 rounded-2xl border p-4"
+      style={{
+        backgroundColor: isHighlight ? '#eff6ff' : '#ffffff',
+        borderColor: isHighlight ? '#bfdbfe' : '#c1c6d640',
+      }}
+    >
       <View className="flex-row items-center gap-2 mb-2">
         <MaterialIcons name={icon} size={18} color="#005bbf" />
         <Text className="text-xs text-on-surface-variant font-semibold tracking-wide">{label}</Text>
@@ -41,7 +44,7 @@ const StatCard = ({ icon, label, value, tone = 'default' }) => {
 };
 
 const SessionCard = ({ item }) => (
-  <View className="bg-surface-container-lowest border border-outline-variant/25 rounded-2xl p-4 mb-3">
+  <View className="bg-surface-container-lowest rounded-2xl p-4 mb-3" style={{ borderWidth: 1, borderColor: '#c1c6d640' }}>
     <View className="flex-row items-center justify-between">
       <Text className="font-extrabold text-on-surface flex-1 pr-3">{item.SessionName}</Text>
       <View className="bg-blue-50 px-2 py-1 rounded-lg">
@@ -163,7 +166,7 @@ const StudentDashboardScreen = ({ route, navigation }) => {
   );
 
   const renderJoinClass = () => (
-    <View className="bg-surface-container-lowest border border-outline-variant/25 rounded-2xl p-5">
+    <View className="bg-surface-container-lowest rounded-2xl p-5" style={{ borderWidth: 1, borderColor: '#c1c6d640' }}>
       <Text className="text-xl font-black text-on-surface mb-2">Tham gia lớp học</Text>
       <Text className="text-on-surface-variant mb-4 leading-6">
         Nhập mã lớp do giáo viên cung cấp để tham gia lớp, nhận lịch thi và theo dõi kết quả học tập.
@@ -183,7 +186,7 @@ const StudentDashboardScreen = ({ route, navigation }) => {
       {filteredSessions.length > 0 ? (
         filteredSessions.map((item) => <SessionCard key={String(item.Id)} item={item} />)
       ) : (
-        <View className="bg-surface-container-lowest border border-outline-variant/20 rounded-2xl p-6 items-center">
+        <View className="bg-surface-container-lowest rounded-2xl p-6 items-center" style={{ borderWidth: 1, borderColor: '#c1c6d633' }}>
           <Text className="text-on-surface-variant">Hiện chưa có ca thi nào được phân công.</Text>
         </View>
       )}
@@ -203,7 +206,7 @@ const StudentDashboardScreen = ({ route, navigation }) => {
           <StatCard icon="task-alt" label="Tỉ lệ hoàn thành" value={`${completion}%`} tone="highlight" />
           <StatCard icon="event-upcoming" label="Lịch thi sắp tới" value={upcoming} />
         </View>
-        <View className="bg-surface-container-lowest border border-outline-variant/25 rounded-2xl p-4">
+        <View className="bg-surface-container-lowest rounded-2xl p-4" style={{ borderWidth: 1, borderColor: '#c1c6d640' }}>
           <Text className="text-sm text-on-surface-variant">Đánh giá nhanh</Text>
           <Text className="text-base font-bold text-on-surface mt-1">
             {completion >= 80
@@ -218,7 +221,7 @@ const StudentDashboardScreen = ({ route, navigation }) => {
   const renderProfile = () => (
     <View className="mb-6">
       <Text className="text-xl font-bold text-on-surface mb-4">Thông tin tài khoản</Text>
-      <View className="bg-surface-container-lowest border border-outline-variant/25 rounded-2xl p-5">
+      <View className="bg-surface-container-lowest rounded-2xl p-5" style={{ borderWidth: 1, borderColor: '#c1c6d640' }}>
         <View className="flex-row items-center">
           <View className="w-14 h-14 rounded-full bg-primary items-center justify-center mr-4">
             <Text className="text-white font-bold text-lg">{initials}</Text>
@@ -250,7 +253,7 @@ const StudentDashboardScreen = ({ route, navigation }) => {
 
   if (loading) {
     return (
-      <SafeAreaView className="flex-1 items-center justify-center bg-surface-container-low">
+      <SafeAreaView edges={['top', 'bottom']} className="flex-1 items-center justify-center bg-surface-container-low">
         <ActivityIndicator size="large" color="#005bbf" />
         <Text className="mt-3 text-on-surface-variant">Đang tải dashboard...</Text>
       </SafeAreaView>
@@ -259,6 +262,7 @@ const StudentDashboardScreen = ({ route, navigation }) => {
 
   return (
     <SafeAreaView
+      edges={['bottom']}
       className="flex-1 bg-surface-container-low"
       style={Platform.OS === 'web' ? { height: '100vh', overflow: 'hidden' } : {}}
     >

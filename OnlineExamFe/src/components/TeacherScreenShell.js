@@ -1,5 +1,6 @@
 import React from 'react';
-import { Platform, SafeAreaView, View } from 'react-native';
+import { Platform, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import BottomSidebarNav from './BottomSidebarNav';
 import DashboardTopBar from './DashboardTopBar';
 
@@ -12,18 +13,21 @@ const TeacherScreenShell = ({
   onSelectBottomNav,
   searchText,
   onChangeSearch,
+  searchPlaceholder,
   upcomingCount,
   initials,
   onPressAvatar,
 }) => {
   return (
     <SafeAreaView
+      edges={['bottom']}
       className="flex-1 bg-surface-container-low"
       style={Platform.OS === 'web' ? { height: '100vh', overflow: 'hidden', position: 'relative' } : { flex: 1 }}
     >
       <DashboardTopBar
         searchText={searchText}
         onChangeSearch={onChangeSearch}
+        searchPlaceholder={searchPlaceholder}
         upcomingCount={upcomingCount}
         initials={initials}
         onPressAvatar={onPressAvatar}

@@ -55,6 +55,75 @@ export async function getTeacherClassrooms(userId) {
   }
 }
 
+export async function getTeacherSessions(userId) {
+  try {
+    const response = await api.get(`/api/dashboard/teacher/${userId}/sessions`);
+    return response.data;
+  } catch (error) {
+    // Backward compatibility: older backend may not expose /sessions route yet.
+    const status = error?.response?.status;
+    const legacyHtmlNotFound =
+      typeof error?.response?.data === 'string' && error.response.data.includes('Cannot GET');
+
+    if (status === 404 || legacyHtmlNotFound) {
+      const fallbackResponse = await api.get(`/api/dashboard/teacher/${userId}`);
+      return {
+        teacher: fallbackResponse?.data?.teacher || null,
+        sessions: Array.isArray(fallbackResponse?.data?.sessions)
+          ? fallbackResponse.data.sessions
+          : [],
+      };
+    }
+
+    throw error;
+  }
+}
+
+export async function getTeacherSessionFormOptions(userId) {
+  const response = await api.get(`/api/dashboard/teacher/${userId}/sessions/form-options`);
+  return response.data;
+}
+
+export async function previewTeacherSession(userId, payload) {
+  const response = await api.post(`/api/dashboard/teacher/${userId}/sessions/preview`, payload);
+  return response.data;
+}
+
+export async function createTeacherSession(userId, payload) {
+  const response = await api.post(`/api/dashboard/teacher/${userId}/sessions`, payload);
+  return response.data;
+}
+
+export async function createTeacherClassroom(userId, payload) {
+  const response = await api.post(`/api/dashboard/teacher/${userId}/classrooms`, payload);
+  return response.data;
+}
+
+export async function updateTeacherClassroom(userId, classroomId, payload) {
+  const response = await api.put(
+    `/api/dashboard/teacher/${userId}/classrooms/${classroomId}`,
+    payload
+  );
+  return response.data;
+}
+
+export async function deleteTeacherClassroom(userId, classroomId) {
+  const response = await api.delete(`/api/dashboard/teacher/${userId}/classrooms/${classroomId}`);
+  return response.data;
+}
+
+export async function getTeacherClassroomDetail(userId, classroomId) {
+  const response = await api.get(`/api/dashboard/teacher/${userId}/classrooms/${classroomId}`);
+  return response.data;
+}
+
+export async function removeStudentFromTeacherClassroom(userId, classroomId, studentId) {
+  const response = await api.delete(
+    `/api/dashboard/teacher/${userId}/classrooms/${classroomId}/students/${studentId}`
+  );
+  return response.data;
+}
+
 export async function getStudentDashboard(userId) {
   const response = await api.get(`/api/dashboard/student/${userId}`);
   return response.data;

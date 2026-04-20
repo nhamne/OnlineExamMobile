@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
 import { Animated, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const ToastContext = createContext(null);
 
@@ -27,6 +28,8 @@ export const ToastProvider = ({ children }) => {
   const [toast, setToast] = useState(null);
   const anim = useRef(new Animated.Value(0)).current;
   const hideTimerRef = useRef(null);
+  const insets = useSafeAreaInsets();
+  const topOffset = Math.max((insets?.top || 0) + 24, 44);
 
   const hideToast = useCallback(() => {
     if (hideTimerRef.current) {
@@ -75,7 +78,7 @@ export const ToastProvider = ({ children }) => {
           pointerEvents="none"
           style={{
             position: 'absolute',
-            top: 16,
+            top: topOffset,
             left: 16,
             right: 16,
             alignItems: 'center',

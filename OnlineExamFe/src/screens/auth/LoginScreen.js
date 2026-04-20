@@ -123,7 +123,7 @@ const LoginScreen = ({ navigation }) => {
         className="flex-1"
       >
         <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center' }} keyboardShouldPersistTaps="handled">
-          <View className="flex-none bg-surface-container-lowest rounded-xl m-4 p-6 md:p-8 shadow-sm mb-4">
+          <View className="flex-none bg-surface-container-lowest rounded-xl m-4 p-6 shadow-sm mb-4">
           <View className="flex-row items-center gap-2 mb-8">
             <MaterialIcons name="menu-book" size={32} color="#005bbf" />
             <Text className="text-xl font-black text-primary tracking-tighter">Online Exam</Text>
@@ -156,7 +156,7 @@ const LoginScreen = ({ navigation }) => {
               <Text className="mt-4 text-sm font-semibold tracking-wide text-on-surface-variant mb-1">
                 Email
               </Text>
-              <View className="flex-row items-center bg-surface-container-highest rounded-xl px-4 h-14 border border-outline-variant/50">
+              <View className="flex-row items-center bg-surface-container-highest rounded-xl px-4 h-14 border" style={{ borderColor: '#c1c6d680' }}>
                 <MaterialIcons name="mail-outline" size={20} color="#727785" />
                 <TextInput
                   className="flex-1 ml-3 text-on-surface font-body text-base"
@@ -176,7 +176,7 @@ const LoginScreen = ({ navigation }) => {
               <Text className="text-sm font-semibold tracking-wide text-on-surface-variant mb-1">
                 Mật khẩu
               </Text>
-              <View className="flex-row items-center bg-surface-container-highest rounded-xl px-4 h-14 border border-outline-variant/50">
+              <View className="flex-row items-center bg-surface-container-highest rounded-xl px-4 h-14 border" style={{ borderColor: '#c1c6d680' }}>
                 <MaterialIcons name="lock-outline" size={20} color="#727785" />
                 <TextInput
                   className="flex-1 ml-3 text-on-surface font-body text-base"
@@ -203,8 +203,8 @@ const LoginScreen = ({ navigation }) => {
                 onPress={() => setRememberMe(!rememberMe)}
               >
                 <View
-                  className={`w-5 h-5 border-2 rounded flex items-center justify-center ${rememberMe ? 'bg-primary border-primary' : 'border-outline-variant'
-                    }`}
+                  className="w-5 h-5 border-2 rounded flex items-center justify-center"
+                  style={{ backgroundColor: rememberMe ? '#005bbf' : 'transparent', borderColor: rememberMe ? '#005bbf' : '#c1c6d6' }}
                 >
                   {rememberMe && <MaterialIcons name="check" size={14} color="white" />}
                 </View>
@@ -218,7 +218,7 @@ const LoginScreen = ({ navigation }) => {
             </View>
 
             <TouchableOpacity
-              className="w-full bg-primary py-4 rounded-lg items-center shadow-md shadow-primary/20 mb-8"
+              className="w-full bg-primary py-4 rounded-lg items-center shadow-md mb-8"
               onPress={onLogin}
               disabled={loading}
             >

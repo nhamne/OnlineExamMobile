@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -12,7 +12,6 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { register } from '../../services/authService';
 import RoleSegmentedControl from '../../components/RoleSegmentedControl';
@@ -50,18 +49,6 @@ const RegisterScreen = ({ navigation }) => {
       useNativeDriver: true,
     }).start();
   }, [role, slideAnim]);
-
-  // Reset input fields when screen is focused
-  useFocusEffect(
-    useCallback(() => {
-      // Reset all input fields when screen is focused
-      setFullName('');
-      setEmail('');
-      setPassword('');
-      setShowPassword(false);
-      return () => {};
-    }, [])
-  );
 
   const roleCopy = getRoleCopy(role);
 
@@ -107,7 +94,7 @@ const RegisterScreen = ({ navigation }) => {
         className="flex-1"
       >
         <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center' }} keyboardShouldPersistTaps="handled">
-          <View className="flex-none bg-surface-container-lowest rounded-xl m-4 p-6 md:p-8 shadow-sm mb-4">
+          <View className="flex-none bg-surface-container-lowest rounded-xl m-4 p-6 shadow-sm mb-4">
             <View className="flex-row items-center gap-2 mb-8">
               <MaterialIcons name="menu-book" size={32} color="#005bbf" />
               <Text className="text-xl font-black text-primary tracking-tighter">Online Exam</Text>
@@ -138,7 +125,7 @@ const RegisterScreen = ({ navigation }) => {
                 <Text className="text-sm font-semibold tracking-wide text-on-surface-variant mb-1">
                   Họ và tên
                 </Text>
-                <View className="flex-row items-center bg-surface-container-highest rounded-xl px-4 h-14 border border-outline-variant/50">
+                <View className="flex-row items-center bg-surface-container-highest rounded-xl px-4 h-14 border" style={{ borderColor: '#c1c6d680' }}>
                   <MaterialIcons name="person-outline" size={20} color="#727785" />
                   <TextInput
                     className="flex-1 ml-3 text-on-surface font-body text-base"
@@ -155,7 +142,7 @@ const RegisterScreen = ({ navigation }) => {
                 <Text className="text-sm font-semibold tracking-wide text-on-surface-variant mb-1">
                   Email
                 </Text>
-                <View className="flex-row items-center bg-surface-container-highest rounded-xl px-4 h-14 border border-outline-variant/50">
+                <View className="flex-row items-center bg-surface-container-highest rounded-xl px-4 h-14 border" style={{ borderColor: '#c1c6d680' }}>
                   <MaterialIcons name="mail-outline" size={20} color="#727785" />
                   <TextInput
                     className="flex-1 ml-3 text-on-surface font-body text-base"
@@ -175,7 +162,7 @@ const RegisterScreen = ({ navigation }) => {
                 <Text className="text-sm font-semibold tracking-wide text-on-surface-variant mb-1">
                   Mật khẩu
                 </Text>
-                <View className="flex-row items-center bg-surface-container-highest rounded-xl px-4 h-14 border border-outline-variant/50">
+                <View className="flex-row items-center bg-surface-container-highest rounded-xl px-4 h-14 border" style={{ borderColor: '#c1c6d680' }}>
                   <MaterialIcons name="lock-outline" size={20} color="#727785" />
                   <TextInput
                     className="flex-1 ml-3 text-on-surface font-body text-base"
@@ -197,7 +184,7 @@ const RegisterScreen = ({ navigation }) => {
               </View>
 
               <TouchableOpacity
-                className="flex-row justify-center items-center w-full bg-primary py-4 rounded-lg shadow-md shadow-primary/20 mb-8 gap-2"
+                className="flex-row justify-center items-center w-full bg-primary py-4 rounded-lg shadow-md mb-8 gap-2"
                 onPress={onRegister}
                 disabled={loading}
               >
