@@ -31,6 +31,34 @@ export async function getTeacherDashboard(userId) {
   return response.data;
 }
 
+export async function getTeacherExamDetail(userId, examId) {
+  const response = await api.get(`/api/dashboard/teacher/${userId}/exams/${examId}`);
+  return response.data;
+}
+
+export async function deleteTeacherExamQuestion(userId, examId, questionId) {
+  const response = await api.delete(
+    `/api/dashboard/teacher/${userId}/exams/${examId}/questions/${questionId}`
+  );
+  return response.data;
+}
+
+export async function createTeacherExamQuestion(userId, examId, payload) {
+  const response = await api.post(
+    `/api/dashboard/teacher/${userId}/exams/${examId}/questions`,
+    payload
+  );
+  return response.data;
+}
+
+export async function updateTeacherExamQuestion(userId, examId, questionId, payload) {
+  const response = await api.put(
+    `/api/dashboard/teacher/${userId}/exams/${examId}/questions/${questionId}`,
+    payload
+  );
+  return response.data;
+}
+
 export async function getTeacherClassrooms(userId) {
   try {
     const response = await api.get(`/api/dashboard/teacher/${userId}/classrooms`);
@@ -91,6 +119,26 @@ export async function previewTeacherSession(userId, payload) {
 
 export async function createTeacherSession(userId, payload) {
   const response = await api.post(`/api/dashboard/teacher/${userId}/sessions`, payload);
+  return response.data;
+}
+
+export async function createTeacherExam(userId, payload) {
+  const response = await api.post(`/api/dashboard/teacher/${userId}/exams`, payload);
+  return response.data;
+}
+
+export async function updateTeacherExam(userId, examId, payload) {
+  const response = await api.put(`/api/dashboard/teacher/${userId}/exams/${examId}`, payload);
+  return response.data;
+}
+
+export async function deleteTeacherExam(userId, examId) {
+  const response = await api.delete(`/api/dashboard/teacher/${userId}/exams/${examId}`);
+  return response.data;
+}
+
+export async function copyTeacherExam(userId, examId) {
+  const response = await api.post(`/api/dashboard/teacher/${userId}/exams/${examId}/copy`);
   return response.data;
 }
 

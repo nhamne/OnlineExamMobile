@@ -8,6 +8,10 @@ import StudentDashboardScreen from '../screens/dashboard/StudentDashboardScreen'
 import ClassScreen from '../screens/teacher/ClassScreen';
 import ClassroomManagementScreen from '../screens/teacher/ClassroomManagementScreen';
 import SessionScreen from '../screens/teacher/SessionScreen';
+import ExamEditorContent from '../screens/teacher/ExamEditorContent';
+import ManualExamForm from '../screens/teacher/ManualExamForm';
+import AIOCRScreen from '../screens/teacher/AIOCRScreen';
+import ExamDetailScreen from '../screens/teacher/ExamDetailScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -41,6 +45,26 @@ const AppNavigator = ({ initialRouteName = 'Login', initialUser = null }) => {
 				<Stack.Screen
 					name="TeacherSessions"
 					component={SessionScreen}
+					initialParams={{ user: initialUser }}
+				/>
+				<Stack.Screen
+					name="TeacherExamEditor"
+					component={ExamEditorContent}
+					initialParams={{ user: initialUser }}
+				/>
+				<Stack.Screen
+					name="TeacherManualExamForm"
+					component={ManualExamForm}
+					initialParams={{ user: initialUser }}
+				/>
+				<Stack.Screen
+					name="TeacherAIOCR"
+					component={AIOCRScreen}
+					initialParams={{ user: initialUser }}
+				/>
+				<Stack.Screen
+					name="TeacherExamDetail"
+					component={ExamDetailScreen}
 					initialParams={{ user: initialUser }}
 				/>
 				<Stack.Screen
