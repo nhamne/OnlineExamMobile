@@ -102,7 +102,8 @@ BEGIN
         IsShuffled BIT DEFAULT 1,
         ShuffleQuestions BIT DEFAULT 1,
         ShuffleAnswers BIT DEFAULT 1,
-        Notes NVARCHAR(MAX) NULL
+        Notes NVARCHAR(MAX) NULL,
+        IsDeleted BIT DEFAULT 0
     );
 END
 GO
@@ -134,6 +135,13 @@ GO
 IF COL_LENGTH('ExamSessions', 'Notes') IS NULL
 BEGIN
     ALTER TABLE ExamSessions ADD Notes NVARCHAR(MAX) NULL;
+END
+GO
+
+
+IF COL_LENGTH('ExamSessions', 'IsDeleted') IS NULL
+BEGIN
+    ALTER TABLE ExamSessions ADD IsDeleted BIT NOT NULL CONSTRAINT DF_ExamSessions_IsDeleted DEFAULT(0);
 END
 GO
 

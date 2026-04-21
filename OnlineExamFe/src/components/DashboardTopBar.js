@@ -6,7 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 const DashboardTopBar = ({
   searchText,
   onChangeSearch,
-  searchPlaceholder = 'Tìm kiếm lớp, đề, ca thi...',
+  searchPlaceholder = 'Tìm kiếm...',
   upcomingCount = 0,
   initials = '--',
   onPressAvatar,
