@@ -69,6 +69,18 @@ BEGIN
 END
 GO
 
+IF COL_LENGTH('ExamPapers', 'Subject') IS NULL
+BEGIN
+    ALTER TABLE ExamPapers ADD Subject NVARCHAR(255) NULL;
+END
+GO
+
+IF COL_LENGTH('ExamPapers', 'IsDraft') IS NULL
+BEGIN
+    ALTER TABLE ExamPapers ADD IsDraft BIT NOT NULL CONSTRAINT DF_ExamPapers_IsDraft DEFAULT(0);
+END
+GO
+
 -- 6. Bảng Questions (Câu hỏi trắc nghiệm)
 IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='Questions' AND xtype='U')
 BEGIN
