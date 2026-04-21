@@ -191,3 +191,18 @@ export async function getStudentDashboard(userId) {
   const response = await api.get(`/api/dashboard/student/${userId}`);
   return response.data;
 }
+
+export async function getStudentClassrooms(userId) {
+  const response = await api.get(`/api/dashboard/student/${userId}/classrooms`);
+  return response.data;
+}
+
+export async function joinClassroom(userId, joinCode) {
+  const response = await api.post('/api/class/join', { studentId: userId, classCode: joinCode });
+  return response.data;
+}
+
+export async function startExamAttempt(userId, sessionId) {
+  const response = await api.post(`/api/exam/attempt/start/${sessionId}`, { studentId: userId });
+  return response.data;
+}
