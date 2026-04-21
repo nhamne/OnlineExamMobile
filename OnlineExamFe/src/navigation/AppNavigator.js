@@ -4,10 +4,12 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import LoginScreen from '../screens/auth/LoginScreen';
 import RegisterScreen from '../screens/auth/RegisterScreen';
 import TeacherDashboardScreen from '../screens/dashboard/TeacherDashboardScreen';
+import TeacherProfileScreen from '../screens/teacher/TeacherProfileScreen';
 import StudentDashboardScreen from '../screens/dashboard/StudentDashboardScreen';
 import ClassScreen from '../screens/teacher/ClassScreen';
 import ClassroomManagementScreen from '../screens/teacher/ClassroomManagementScreen';
 import SessionScreen from '../screens/teacher/SessionScreen';
+import SessionManagementScreen from '../screens/teacher/SessionManagementScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -29,6 +31,11 @@ const AppNavigator = ({ initialRouteName = 'Login', initialUser = null }) => {
 					initialParams={{ user: initialUser }}
 				/>
 				<Stack.Screen
+					name="TeacherProfile"
+					component={TeacherProfileScreen}
+					initialParams={{ user: initialUser }}
+				/>
+				<Stack.Screen
 					name="TeacherClassrooms"
 					component={ClassScreen}
 					initialParams={{ user: initialUser }}
@@ -41,6 +48,11 @@ const AppNavigator = ({ initialRouteName = 'Login', initialUser = null }) => {
 				<Stack.Screen
 					name="TeacherSessions"
 					component={SessionScreen}
+					initialParams={{ user: initialUser }}
+				/>
+				<Stack.Screen
+					name="TeacherSessionManagement"
+					component={SessionManagementScreen}
 					initialParams={{ user: initialUser }}
 				/>
 				<Stack.Screen

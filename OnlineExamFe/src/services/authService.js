@@ -94,6 +94,21 @@ export async function createTeacherSession(userId, payload) {
   return response.data;
 }
 
+export async function updateTeacherSession(userId, sessionId, payload) {
+  const response = await api.put(`/api/dashboard/teacher/${userId}/sessions/${sessionId}`, payload);
+  return response.data;
+}
+
+export async function deleteTeacherSession(userId, sessionId) {
+  const response = await api.delete(`/api/dashboard/teacher/${userId}/sessions/${sessionId}`);
+  return response.data;
+}
+
+export async function getTeacherSessionDetail(userId, sessionId) {
+  const response = await api.get(`/api/dashboard/teacher/${userId}/session-detail/${sessionId}`);
+  return response.data;
+}
+
 export async function createTeacherClassroom(userId, payload) {
   const response = await api.post(`/api/dashboard/teacher/${userId}/classrooms`, payload);
   return response.data;

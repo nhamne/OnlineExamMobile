@@ -317,7 +317,7 @@ const ClassScreen = ({ route, navigation }) => {
       onChangeSearch={setSearchText}
       upcomingCount={0}
       initials={teacherInitials}
-      onPressAvatar={() => navigation.replace('TeacherDashboard', { user, initialTab: 'profile' })}
+      onPressAvatar={() => navigation.navigate('TeacherProfile', { user })}
     >
       <Animated.View style={{ flex: 1, opacity: bodyOpacity }}>
         <ScrollView

@@ -143,6 +143,63 @@ function buildPreviewQuestions(questions, { isShuffled, shuffleQuestions, shuffl
   });
 }
 
+function getPublicBaseUrl(req) {
+  const explicit = String(process.env.PUBLIC_APP_URL || '').trim();
+  if (explicit) {
+    return explicit.replace(/\/$/, '');
+  }
+
+  const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim();
+  const protocol = forwardedProto || req.protocol || 'http';
+  const host = req.get('host');
+  return `${protocol}://${host}`;
+}
+
+function buildSessionAccessInfo(req, { sessionId, joinCode }) {
+  const baseUrl = getPublicBaseUrl(req);
+  const explicitStudentEntry = String(process.env.PUBLIC_STUDENT_EXAM_URL || '').trim();
+  const encodedSessionId = encodeURIComponent(String(sessionId));
+  const encodedJoinCode = joinCode ? encodeURIComponent(String(joinCode)) : '';
+  const query = `sessionId=${encodedSessionId}${encodedJoinCode ? `&joinCode=${encodedJoinCode}` : ''}`;
+  const sessionLink = explicitStudentEntry
+    ? `${explicitStudentEntry}${explicitStudentEntry.includes('?') ? '&' : '?'}${query}`
+    : `${baseUrl}/api/public/sessions/access?${query}`;
+
+  return {
+    sessionLink,
+    qrImageUrl: `https://api.qrserver.com/v1/create-qr-code/?size=512x512&data=${encodeURIComponent(sessionLink)}`,
+  };
+}
+
+async function findOverlappingSession(pool, { teacherId, classroomId, startDate, endDate, excludeSessionId }) {
+  const overlapResult = await pool
+    .request()
+    .input('teacherId', sql.Int, teacherId)
+    .input('classroomId', sql.Int, classroomId)
+    .input('startTime', sql.DateTime, startDate)
+    .input('endTime', sql.DateTime, endDate)
+    .input('excludeSessionId', sql.Int, Number.isInteger(excludeSessionId) ? excludeSessionId : null)
+    .query(`
+      SELECT TOP 1
+        es.Id,
+        es.SessionName,
+        es.StartTime,
+        es.EndTime
+      FROM ExamSessions es
+      INNER JOIN Classrooms c ON c.Id = es.ClassroomId
+      WHERE c.TeacherId = @teacherId
+        AND c.IsDeleted = 0
+        AND es.IsDeleted = 0
+        AND es.ClassroomId = @classroomId
+        AND (@excludeSessionId IS NULL OR es.Id <> @excludeSessionId)
+        AND es.StartTime < @endTime
+        AND es.EndTime > @startTime
+      ORDER BY es.StartTime ASC
+    `);
+
+  return overlapResult.recordset[0] || null;
+}
+
 app.get('/', (_req, res) => {
   res.send('OnlineExam backend is running.');
 });
@@ -865,12 +922,156 @@ app.get('/api/dashboard/teacher/:userId/sessions', async (req, res) => {
         WHERE c.TeacherId = @teacherId
           AND c.IsDeleted = 0
           AND ep.IsDeleted = 0
+          AND es.IsDeleted = 0
         ORDER BY es.StartTime DESC, es.Id DESC
       `);
 
+    const sessions = sessionsResult.recordset.map((session) => {
+      const accessInfo = buildSessionAccessInfo(req, {
+        sessionId: session.Id,
+        joinCode: session.JoinCode,
+      });
+
+      return {
+        ...session,
+        SessionLink: accessInfo.sessionLink,
+        QrImageUrl: accessInfo.qrImageUrl,
+      };
+    });
+
     return res.json({
       teacher: sanitizeUser(teacherCheck.recordset[0]),
-      sessions: sessionsResult.recordset,
+      sessions,
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+app.get('/api/dashboard/teacher/:userId/session-detail/:sessionId', async (req, res) => {
+  try {
+    const userId = Number(req.params.userId);
+    const sessionId = Number(req.params.sessionId);
+
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({ message: 'Invalid userId.' });
+    }
+
+    if (!Number.isInteger(sessionId) || sessionId <= 0) {
+      return res.status(400).json({ message: 'Invalid sessionId.' });
+    }
+
+    const pool = await getPool();
+
+    const teacherCheck = await pool
+      .request()
+      .input('teacherId', sql.Int, userId)
+      .query(`
+        SELECT TOP 1 Id, FullName, Email, Role, IsActive
+        FROM Users
+        WHERE Id = @teacherId AND Role = 'Teacher'
+      `);
+
+    if (teacherCheck.recordset.length === 0) {
+      return res.status(404).json({ message: 'Teacher not found.' });
+    }
+
+    const sessionResult = await pool
+      .request()
+      .input('teacherId', sql.Int, userId)
+      .input('sessionId', sql.Int, sessionId)
+      .query(`
+        SELECT TOP 1
+          es.Id,
+          es.SessionName,
+          es.ClassroomId,
+          es.ExamPaperId,
+          es.StartTime,
+          es.EndTime,
+          es.DurationInMinutes,
+          es.SessionPassword,
+          es.AllowViewExplanation,
+          es.IsShuffled,
+          es.ShuffleQuestions,
+          es.ShuffleAnswers,
+          es.Notes,
+          c.ClassName,
+          c.JoinCode,
+          ep.Title AS ExamTitle,
+          ep.DurationInMinutes AS ExamPaperDurationInMinutes,
+          (SELECT COUNT(*) FROM Questions q WHERE q.ExamPaperId = ep.Id) AS QuestionCount,
+          (SELECT COUNT(*) FROM ClassroomMembers cm WHERE cm.ClassroomId = c.Id) AS ClassroomStudentCount,
+          (SELECT COUNT(*) FROM Submissions s WHERE s.ExamSessionId = es.Id) AS SubmissionCount,
+          (SELECT COUNT(*) FROM Submissions s WHERE s.ExamSessionId = es.Id AND s.Status IN (1, 2)) AS SubmittedCount
+        FROM ExamSessions es
+        INNER JOIN Classrooms c ON c.Id = es.ClassroomId
+        INNER JOIN ExamPapers ep ON ep.Id = es.ExamPaperId
+        WHERE es.Id = @sessionId
+          AND c.TeacherId = @teacherId
+          AND c.IsDeleted = 0
+          AND ep.IsDeleted = 0
+          AND es.IsDeleted = 0
+      `);
+
+    if (sessionResult.recordset.length === 0) {
+      return res.status(404).json({ message: 'Session not found or not owned by teacher.' });
+    }
+
+    const studentRows = await pool
+      .request()
+      .input('sessionId', sql.Int, sessionId)
+      .query(`
+        SELECT
+          u.Id,
+          u.FullName,
+          u.Email,
+          latestSubmission.Id AS SubmissionId,
+          latestSubmission.Status,
+          latestSubmission.WarningCount,
+          latestSubmission.Score,
+          latestSubmission.CorrectAnswersCount,
+          latestSubmission.StartedAt,
+          latestSubmission.SubmittedAt,
+          CASE
+            WHEN latestSubmission.StartedAt IS NULL THEN NULL
+            WHEN latestSubmission.SubmittedAt IS NULL THEN DATEDIFF(MINUTE, latestSubmission.StartedAt, GETDATE())
+            ELSE DATEDIFF(MINUTE, latestSubmission.StartedAt, latestSubmission.SubmittedAt)
+          END AS DurationInMinutes
+        FROM ExamSessions es
+        INNER JOIN ClassroomMembers cm ON cm.ClassroomId = es.ClassroomId
+        INNER JOIN Users u ON u.Id = cm.StudentId AND u.Role = 'Student'
+        OUTER APPLY (
+          SELECT TOP 1
+            s.Id,
+            s.Status,
+            s.WarningCount,
+            s.Score,
+            s.CorrectAnswersCount,
+            s.StartedAt,
+            s.SubmittedAt
+          FROM Submissions s
+          WHERE s.ExamSessionId = es.Id
+            AND s.StudentId = u.Id
+          ORDER BY ISNULL(s.SubmittedAt, s.StartedAt) DESC, s.Id DESC
+        ) latestSubmission
+        WHERE es.Id = @sessionId
+        ORDER BY u.FullName ASC, u.Id ASC
+      `);
+
+    const sessionDetail = sessionResult.recordset[0];
+    const accessInfo = buildSessionAccessInfo(req, {
+      sessionId: sessionDetail.Id,
+      joinCode: sessionDetail.JoinCode,
+    });
+
+    return res.json({
+      teacher: sanitizeUser(teacherCheck.recordset[0]),
+      session: {
+        ...sessionDetail,
+        SessionLink: accessInfo.sessionLink,
+        QrImageUrl: accessInfo.qrImageUrl,
+      },
+      students: studentRows.recordset,
     });
   } catch (error) {
     return res.status(500).json({ message: error.message });
@@ -958,6 +1159,7 @@ app.post('/api/dashboard/teacher/:userId/sessions/preview', async (req, res) => 
     const isShuffled = Boolean(req.body?.isShuffled);
     const shuffleQuestions = Boolean(req.body?.shuffleQuestions);
     const shuffleAnswers = Boolean(req.body?.shuffleAnswers);
+    const excludeSessionId = Number(req.body?.excludeSessionId);
 
     const startDate = new Date(req.body?.startTime);
     const endDate = new Date(req.body?.endTime);
@@ -984,6 +1186,10 @@ app.post('/api/dashboard/teacher/:userId/sessions/preview', async (req, res) => 
 
     if (endDate <= startDate) {
       return res.status(400).json({ message: 'Giờ kết thúc phải sau giờ bắt đầu.' });
+    }
+
+    if (startDate < new Date()) {
+      return res.status(400).json({ message: 'Giờ bắt đầu không được ở trong quá khứ.' });
     }
 
     const durationInMinutes = Math.max(1, Math.round((endDate.getTime() - startDate.getTime()) / 60000));
@@ -1033,6 +1239,32 @@ app.post('/api/dashboard/teacher/:userId/sessions/preview', async (req, res) => 
 
     if (examResult.recordset.length === 0) {
       return res.status(404).json({ message: 'Exam paper not found or not owned by teacher.' });
+    }
+
+    const examDurationInMinutes = Number(examResult.recordset[0]?.DurationInMinutes || 0);
+    if (durationInMinutes < examDurationInMinutes) {
+      return res.status(400).json({
+        message: `Thời lượng ca thi (${durationInMinutes} phút) không được nhỏ hơn thời lượng đề thi (${examDurationInMinutes} phút).`,
+      });
+    }
+
+    const conflictSession = await findOverlappingSession(pool, {
+      teacherId: userId,
+      classroomId,
+      startDate,
+      endDate,
+      excludeSessionId: Number.isInteger(excludeSessionId) && excludeSessionId > 0 ? excludeSessionId : null,
+    });
+
+    if (conflictSession) {
+      return res.status(409).json({
+        message: `Lớp đã có ca thi trùng thời gian (${conflictSession.SessionName}: ${new Date(
+          conflictSession.StartTime
+        ).toLocaleString('vi-VN', { hour12: false })} - ${new Date(conflictSession.EndTime).toLocaleString(
+          'vi-VN',
+          { hour12: false }
+        )}).`,
+      });
     }
 
     const questionsResult = await pool
@@ -1131,6 +1363,10 @@ app.post('/api/dashboard/teacher/:userId/sessions', async (req, res) => {
       return res.status(400).json({ message: 'Giờ kết thúc phải sau giờ bắt đầu.' });
     }
 
+    if (startDate < new Date()) {
+      return res.status(400).json({ message: 'Giờ bắt đầu không được ở trong quá khứ.' });
+    }
+
     const durationInMinutes = Math.max(1, Math.round((endDate.getTime() - startDate.getTime()) / 60000));
 
     const pool = await getPool();
@@ -1169,7 +1405,7 @@ app.post('/api/dashboard/teacher/:userId/sessions', async (req, res) => {
       .input('teacherId', sql.Int, userId)
       .input('examPaperId', sql.Int, examPaperId)
       .query(`
-        SELECT TOP 1 Id
+        SELECT TOP 1 Id, DurationInMinutes
         FROM ExamPapers
         WHERE Id = @examPaperId
           AND TeacherId = @teacherId
@@ -1178,6 +1414,31 @@ app.post('/api/dashboard/teacher/:userId/sessions', async (req, res) => {
 
     if (examCheck.recordset.length === 0) {
       return res.status(404).json({ message: 'Exam paper not found or not owned by teacher.' });
+    }
+
+    const examDurationInMinutes = Number(examCheck.recordset[0]?.DurationInMinutes || 0);
+    if (durationInMinutes < examDurationInMinutes) {
+      return res.status(400).json({
+        message: `Thời lượng ca thi (${durationInMinutes} phút) không được nhỏ hơn thời lượng đề thi (${examDurationInMinutes} phút).`,
+      });
+    }
+
+    const conflictSession = await findOverlappingSession(pool, {
+      teacherId: userId,
+      classroomId,
+      startDate,
+      endDate,
+    });
+
+    if (conflictSession) {
+      return res.status(409).json({
+        message: `Lớp đã có ca thi trùng thời gian (${conflictSession.SessionName}: ${new Date(
+          conflictSession.StartTime
+        ).toLocaleString('vi-VN', { hour12: false })} - ${new Date(conflictSession.EndTime).toLocaleString(
+          'vi-VN',
+          { hour12: false }
+        )}).`,
+      });
     }
 
     const createdResult = await pool
@@ -1270,11 +1531,343 @@ app.post('/api/dashboard/teacher/:userId/sessions', async (req, res) => {
         INNER JOIN Classrooms c ON c.Id = es.ClassroomId
         INNER JOIN ExamPapers ep ON ep.Id = es.ExamPaperId
         WHERE es.Id = @sessionId
+          AND es.IsDeleted = 0
       `);
+
+    const sessionDetail = detailResult.recordset[0] || created;
+    const accessInfo = buildSessionAccessInfo(req, {
+      sessionId: sessionDetail.Id,
+      joinCode: sessionDetail.JoinCode,
+    });
 
     return res.status(201).json({
       message: 'Tạo ca thi thành công.',
-      session: detailResult.recordset[0] || created,
+      session: {
+        ...sessionDetail,
+        SessionLink: accessInfo.sessionLink,
+        QrImageUrl: accessInfo.qrImageUrl,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+app.put('/api/dashboard/teacher/:userId/sessions/:sessionId', async (req, res) => {
+  try {
+    const userId = Number(req.params.userId);
+    const sessionId = Number(req.params.sessionId);
+    const sessionName = String(req.body?.sessionName || '').trim();
+    const classroomId = Number(req.body?.classroomId);
+    const examPaperId = Number(req.body?.examPaperId);
+    const sessionPasswordRaw = req.body?.sessionPassword;
+    const sessionPassword =
+      sessionPasswordRaw === null || sessionPasswordRaw === undefined
+        ? null
+        : String(sessionPasswordRaw).trim() || null;
+    const notesRaw = req.body?.notes;
+    const notes = notesRaw === null || notesRaw === undefined ? null : String(notesRaw).trim() || null;
+    const allowViewExplanation = Boolean(req.body?.allowViewExplanation);
+    const isShuffled = Boolean(req.body?.isShuffled);
+    const shuffleQuestions = Boolean(req.body?.shuffleQuestions);
+    const shuffleAnswers = Boolean(req.body?.shuffleAnswers);
+
+    const startDate = new Date(req.body?.startTime);
+    const endDate = new Date(req.body?.endTime);
+
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({ message: 'Invalid userId.' });
+    }
+
+    if (!Number.isInteger(sessionId) || sessionId <= 0) {
+      return res.status(400).json({ message: 'Invalid sessionId.' });
+    }
+
+    if (!sessionName) {
+      return res.status(400).json({ message: 'Tên ca thi là bắt buộc.' });
+    }
+
+    if (!Number.isInteger(classroomId) || classroomId <= 0) {
+      return res.status(400).json({ message: 'Lớp học tham gia là bắt buộc.' });
+    }
+
+    if (!Number.isInteger(examPaperId) || examPaperId <= 0) {
+      return res.status(400).json({ message: 'Đề thi là bắt buộc.' });
+    }
+
+    if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
+      return res.status(400).json({ message: 'Giờ bắt đầu/kết thúc không hợp lệ.' });
+    }
+
+    if (endDate <= startDate) {
+      return res.status(400).json({ message: 'Giờ kết thúc phải sau giờ bắt đầu.' });
+    }
+
+    if (startDate < new Date()) {
+      return res.status(400).json({ message: 'Giờ bắt đầu không được ở trong quá khứ.' });
+    }
+
+    const durationInMinutes = Math.max(1, Math.round((endDate.getTime() - startDate.getTime()) / 60000));
+
+    const pool = await getPool();
+
+    const teacherCheck = await pool
+      .request()
+      .input('teacherId', sql.Int, userId)
+      .query(`
+        SELECT TOP 1 Id
+        FROM Users
+        WHERE Id = @teacherId AND Role = 'Teacher'
+      `);
+
+    if (teacherCheck.recordset.length === 0) {
+      return res.status(404).json({ message: 'Teacher not found.' });
+    }
+
+    const currentSessionResult = await pool
+      .request()
+      .input('teacherId', sql.Int, userId)
+      .input('sessionId', sql.Int, sessionId)
+      .query(`
+        SELECT TOP 1 es.Id, es.StartTime, es.EndTime, es.IsDeleted
+        FROM ExamSessions es
+        INNER JOIN Classrooms c ON c.Id = es.ClassroomId
+        WHERE es.Id = @sessionId
+          AND c.TeacherId = @teacherId
+      `);
+
+    if (currentSessionResult.recordset.length === 0) {
+      return res.status(404).json({ message: 'Session not found or not owned by teacher.' });
+    }
+
+    const currentSession = currentSessionResult.recordset[0];
+    if (currentSession.IsDeleted) {
+      return res.status(404).json({ message: 'Session not found or already deleted.' });
+    }
+
+    if (new Date(currentSession.StartTime) <= new Date()) {
+      return res.status(400).json({ message: 'Chỉ có thể sửa ca thi sắp diễn ra.' });
+    }
+
+    const classroomResult = await pool
+      .request()
+      .input('teacherId', sql.Int, userId)
+      .input('classroomId', sql.Int, classroomId)
+      .query(`
+        SELECT TOP 1 Id, ClassName, JoinCode, CreatedAt
+        FROM Classrooms
+        WHERE Id = @classroomId
+          AND TeacherId = @teacherId
+          AND IsDeleted = 0
+      `);
+
+    if (classroomResult.recordset.length === 0) {
+      return res.status(404).json({ message: 'Classroom not found or not owned by teacher.' });
+    }
+
+    const examResult = await pool
+      .request()
+      .input('teacherId', sql.Int, userId)
+      .input('examPaperId', sql.Int, examPaperId)
+      .query(`
+        SELECT TOP 1 Id, DurationInMinutes, Title
+        FROM ExamPapers
+        WHERE Id = @examPaperId
+          AND TeacherId = @teacherId
+          AND IsDeleted = 0
+      `);
+
+    if (examResult.recordset.length === 0) {
+      return res.status(404).json({ message: 'Exam paper not found or not owned by teacher.' });
+    }
+
+    const examDurationInMinutes = Number(examResult.recordset[0]?.DurationInMinutes || 0);
+    if (durationInMinutes < examDurationInMinutes) {
+      return res.status(400).json({
+        message: `Thời lượng ca thi (${durationInMinutes} phút) không được nhỏ hơn thời lượng đề thi (${examDurationInMinutes} phút).`,
+      });
+    }
+
+    const conflictSession = await findOverlappingSession(pool, {
+      teacherId: userId,
+      classroomId,
+      startDate,
+      endDate,
+      excludeSessionId: sessionId,
+    });
+
+    if (conflictSession) {
+      return res.status(409).json({
+        message: `Lớp đã có ca thi trùng thời gian (${conflictSession.SessionName}: ${new Date(
+          conflictSession.StartTime
+        ).toLocaleString('vi-VN', { hour12: false })} - ${new Date(conflictSession.EndTime).toLocaleString(
+          'vi-VN',
+          { hour12: false }
+        )}).`,
+      });
+    }
+
+    const updatedResult = await pool
+      .request()
+      .input('sessionId', sql.Int, sessionId)
+      .input('teacherId', sql.Int, userId)
+      .input('sessionName', sql.NVarChar(255), sessionName)
+      .input('classroomId', sql.Int, classroomId)
+      .input('examPaperId', sql.Int, examPaperId)
+      .input('startTime', sql.DateTime, startDate)
+      .input('endTime', sql.DateTime, endDate)
+      .input('durationInMinutes', sql.Int, durationInMinutes)
+      .input('sessionPassword', sql.VarChar(50), sessionPassword)
+      .input('allowViewExplanation', sql.Bit, allowViewExplanation)
+      .input('isShuffled', sql.Bit, isShuffled)
+      .input('shuffleQuestions', sql.Bit, shuffleQuestions)
+      .input('shuffleAnswers', sql.Bit, shuffleAnswers)
+      .input('notes', sql.NVarChar(sql.MAX), notes)
+      .query(`
+        UPDATE es
+        SET
+          es.SessionName = @sessionName,
+          es.ClassroomId = @classroomId,
+          es.ExamPaperId = @examPaperId,
+          es.StartTime = @startTime,
+          es.EndTime = @endTime,
+          es.DurationInMinutes = @durationInMinutes,
+          es.SessionPassword = @sessionPassword,
+          es.AllowViewExplanation = @allowViewExplanation,
+          es.IsShuffled = @isShuffled,
+          es.ShuffleQuestions = @shuffleQuestions,
+          es.ShuffleAnswers = @shuffleAnswers,
+          es.Notes = @notes
+        OUTPUT
+          INSERTED.Id,
+          INSERTED.SessionName,
+          INSERTED.ClassroomId,
+          INSERTED.ExamPaperId,
+          INSERTED.StartTime,
+          INSERTED.EndTime,
+          INSERTED.DurationInMinutes,
+          INSERTED.SessionPassword,
+          INSERTED.AllowViewExplanation,
+          INSERTED.IsShuffled,
+          INSERTED.ShuffleQuestions,
+          INSERTED.ShuffleAnswers,
+          INSERTED.Notes
+        FROM ExamSessions es
+        INNER JOIN Classrooms c ON c.Id = es.ClassroomId
+        WHERE es.Id = @sessionId
+          AND c.TeacherId = @teacherId
+          AND c.IsDeleted = 0
+          AND es.IsDeleted = 0
+      `);
+
+    if (updatedResult.recordset.length === 0) {
+      return res.status(404).json({ message: 'Session not found or not owned by teacher.' });
+    }
+
+    const updated = updatedResult.recordset[0];
+    const detailResult = await pool
+      .request()
+      .input('sessionId', sql.Int, updated.Id)
+      .query(`
+        SELECT TOP 1
+          es.Id,
+          es.SessionName,
+          es.ClassroomId,
+          es.ExamPaperId,
+          es.StartTime,
+          es.EndTime,
+          es.DurationInMinutes,
+          es.SessionPassword,
+          es.AllowViewExplanation,
+          es.IsShuffled,
+          es.ShuffleQuestions,
+          es.ShuffleAnswers,
+          es.Notes,
+          c.ClassName,
+          c.JoinCode,
+          ep.Title AS ExamTitle,
+          ep.DurationInMinutes AS ExamPaperDurationInMinutes,
+          (SELECT COUNT(*) FROM Questions q WHERE q.ExamPaperId = ep.Id) AS QuestionCount,
+          (SELECT COUNT(*) FROM Submissions s WHERE s.ExamSessionId = es.Id) AS SubmissionCount,
+          (SELECT COUNT(*) FROM Submissions s WHERE s.ExamSessionId = es.Id AND s.Status IN (1, 2)) AS SubmittedCount
+        FROM ExamSessions es
+        INNER JOIN Classrooms c ON c.Id = es.ClassroomId
+        INNER JOIN ExamPapers ep ON ep.Id = es.ExamPaperId
+        WHERE es.Id = @sessionId
+          AND es.IsDeleted = 0
+      `);
+
+    const sessionDetail = detailResult.recordset[0] || updated;
+    const accessInfo = buildSessionAccessInfo(req, {
+      sessionId: sessionDetail.Id,
+      joinCode: sessionDetail.JoinCode,
+    });
+
+    return res.json({
+      message: 'Cập nhật ca thi thành công.',
+      session: {
+        ...sessionDetail,
+        SessionLink: accessInfo.sessionLink,
+        QrImageUrl: accessInfo.qrImageUrl,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+app.delete('/api/dashboard/teacher/:userId/sessions/:sessionId', async (req, res) => {
+  try {
+    const userId = Number(req.params.userId);
+    const sessionId = Number(req.params.sessionId);
+
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({ message: 'Invalid userId.' });
+    }
+
+    if (!Number.isInteger(sessionId) || sessionId <= 0) {
+      return res.status(400).json({ message: 'Invalid sessionId.' });
+    }
+
+    const pool = await getPool();
+
+    const teacherCheck = await pool
+      .request()
+      .input('teacherId', sql.Int, userId)
+      .query(`
+        SELECT TOP 1 Id
+        FROM Users
+        WHERE Id = @teacherId AND Role = 'Teacher'
+      `);
+
+    if (teacherCheck.recordset.length === 0) {
+      return res.status(404).json({ message: 'Teacher not found.' });
+    }
+
+    const deletedResult = await pool
+      .request()
+      .input('teacherId', sql.Int, userId)
+      .input('sessionId', sql.Int, sessionId)
+      .query(`
+        UPDATE es
+        SET es.IsDeleted = 1
+        OUTPUT INSERTED.Id
+        FROM ExamSessions es
+        INNER JOIN Classrooms c ON c.Id = es.ClassroomId
+        WHERE es.Id = @sessionId
+          AND c.TeacherId = @teacherId
+          AND c.IsDeleted = 0
+          AND es.IsDeleted = 0
+          AND es.StartTime > GETDATE()
+      `);
+
+    if (deletedResult.recordset.length === 0) {
+      return res.status(404).json({ message: 'Session not found or cannot be deleted.' });
+    }
+
+    return res.json({
+      message: 'Xóa ca thi thành công.',
+      sessionId,
     });
   } catch (error) {
     return res.status(500).json({ message: error.message });
@@ -1343,6 +1936,107 @@ app.get('/api/dashboard/student/:userId', async (req, res) => {
     return res.json({
       summary: summaryResult.recordset[0],
       sessions: upcomingSessionsResult.recordset,
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+app.get('/api/public/sessions/access', async (req, res) => {
+  try {
+    const sessionId = Number(req.query.sessionId);
+    const joinCode = String(req.query.joinCode || '').trim();
+
+    if (!Number.isInteger(sessionId) || sessionId <= 0) {
+      return res.status(400).json({ message: 'sessionId không hợp lệ.' });
+    }
+
+    const pool = await getPool();
+
+    const sessionResult = await pool
+      .request()
+      .input('sessionId', sql.Int, sessionId)
+      .query(`
+        SELECT TOP 1
+          es.Id,
+          es.SessionName,
+          es.StartTime,
+          es.EndTime,
+          es.SessionPassword,
+          c.ClassName,
+          c.JoinCode,
+          ep.Title AS ExamTitle
+        FROM ExamSessions es
+        INNER JOIN Classrooms c ON c.Id = es.ClassroomId
+        INNER JOIN ExamPapers ep ON ep.Id = es.ExamPaperId
+        WHERE es.Id = @sessionId
+          AND c.IsDeleted = 0
+          AND ep.IsDeleted = 0
+      `);
+
+    if (sessionResult.recordset.length === 0) {
+      return res.status(404).json({ message: 'Không tìm thấy ca thi.' });
+    }
+
+    const session = sessionResult.recordset[0];
+    if (joinCode && String(session.JoinCode || '').toUpperCase() !== joinCode.toUpperCase()) {
+      return res.status(403).json({ message: 'Link hoặc mã lớp không khớp với ca thi.' });
+    }
+
+    const now = new Date();
+    const startTime = new Date(session.StartTime);
+    const endTime = new Date(session.EndTime);
+    const isUpcoming = now < startTime;
+    const isClosed = now > endTime;
+    const status = isUpcoming ? 'upcoming' : isClosed ? 'closed' : 'open';
+    const message = isUpcoming
+      ? 'Ca thi chưa bắt đầu.'
+      : isClosed
+        ? 'Ca thi đã kết thúc.'
+        : 'Có thể vào ca thi.';
+
+    const acceptHeader = String(req.headers.accept || '').toLowerCase();
+    if (acceptHeader.includes('text/html')) {
+      const escapedSessionName = String(session.SessionName || '--').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const escapedClassName = String(session.ClassName || '--').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const escapedExamTitle = String(session.ExamTitle || '--').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const statusColor = status === 'open' ? '#166534' : status === 'upcoming' ? '#1d4ed8' : '#b42318';
+      const statusBg = status === 'open' ? '#dcfce7' : status === 'upcoming' ? '#dbeafe' : '#fee2e2';
+
+      return res.send(`<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Truy cập ca thi</title>
+  <style>
+    body { font-family: Arial, sans-serif; background: #f3f6fb; margin: 0; padding: 24px; color: #1f2937; }
+    .card { max-width: 560px; margin: 0 auto; background: #fff; border-radius: 16px; padding: 20px; border: 1px solid #dbe1ee; }
+    .badge { display: inline-block; font-size: 12px; font-weight: 700; padding: 6px 10px; border-radius: 999px; background: ${statusBg}; color: ${statusColor}; }
+    h1 { margin: 12px 0 10px; font-size: 24px; }
+    p { margin: 6px 0; }
+    .muted { color: #64748b; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="badge">${message}</div>
+    <h1>${escapedSessionName}</h1>
+    <p><strong>Lớp:</strong> ${escapedClassName}</p>
+    <p><strong>Đề thi:</strong> ${escapedExamTitle}</p>
+    <p><strong>Bắt đầu:</strong> ${new Date(session.StartTime).toLocaleString('vi-VN', { hour12: false })}</p>
+    <p><strong>Kết thúc:</strong> ${new Date(session.EndTime).toLocaleString('vi-VN', { hour12: false })}</p>
+    <p class="muted">Vui lòng đăng nhập tài khoản học sinh trong ứng dụng để vào làm bài thi.</p>
+  </div>
+</body>
+</html>`);
+    }
+
+    return res.json({
+      message,
+      canAccess: !isUpcoming && !isClosed,
+      status,
+      session,
     });
   } catch (error) {
     return res.status(500).json({ message: error.message });

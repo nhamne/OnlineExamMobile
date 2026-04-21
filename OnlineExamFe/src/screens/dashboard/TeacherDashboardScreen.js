@@ -2,19 +2,30 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Animated,
+  Image,
+  Modal,
+  Pressable,
   Platform,
   RefreshControl,
   SafeAreaView,
   ScrollView,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
+import * as Clipboard from 'expo-clipboard';
 import TeacherScreenShell from '../../components/TeacherScreenShell';
+import { API_BASE_URL } from '../../config/api';
 import { useToast } from '../../context/ToastContext';
 import { clearAuthSession } from '../../services/authSession';
-import { getTeacherDashboard } from '../../services/authService';
+import {
+  deleteTeacherSession,
+  getTeacherDashboard,
+  getTeacherSessionFormOptions,
+  updateTeacherSession,
+} from '../../services/authService';
 
 const bottomNavItems = [
   { key: 'home', label: 'Trang chủ', shortLabel: 'Home', icon: 'home' },
@@ -70,7 +81,7 @@ const TeacherDashboardScreen = ({ route, navigation }) => {
   const initialTab = route?.params?.initialTab;
 
   const getStartingTab = () => {
-    const allowedTabs = new Set(['home', 'exams', 'sessions', 'profile']);
+    const allowedTabs = new Set(['home', 'exams']);
     return allowedTabs.has(initialTab) ? initialTab : 'home';
   };
 
@@ -84,6 +95,29 @@ const TeacherDashboardScreen = ({ route, navigation }) => {
   const [classrooms, setClassrooms] = useState([]);
   const [examPapers, setExamPapers] = useState([]);
   const [sessions, setSessions] = useState([]);
+  const [selectedSessionAction, setSelectedSessionAction] = useState(null);
+  const [showQrModal, setShowQrModal] = useState(false);
+  const [showDeleteSessionModal, setShowDeleteSessionModal] = useState(false);
+  const [deletingSession, setDeletingSession] = useState(false);
+  const [pendingDeleteSession, setPendingDeleteSession] = useState(null);
+  const [showEditSessionModal, setShowEditSessionModal] = useState(false);
+  const [editingSession, setEditingSession] = useState(null);
+  const [editSessionLoading, setEditSessionLoading] = useState(false);
+  const [editSessionSubmitting, setEditSessionSubmitting] = useState(false);
+  const [editSessionOptions, setEditSessionOptions] = useState({ classrooms: [], examPapers: [] });
+  const [editSessionForm, setEditSessionForm] = useState({
+    sessionName: '',
+    examPaperId: null,
+    classroomId: null,
+    startTime: '',
+    endTime: '',
+    sessionPassword: '',
+    allowViewExplanation: true,
+    isShuffled: true,
+    shuffleQuestions: true,
+    shuffleAnswers: true,
+    notes: '',
+  });
   const bodyOpacity = React.useRef(new Animated.Value(1)).current;
 
   const ambientShadow = {
@@ -166,7 +200,7 @@ const TeacherDashboardScreen = ({ route, navigation }) => {
       return;
     }
 
-    setActiveTab('profile');
+    navigation.navigate('TeacherProfile', { user: displayTeacher || user });
   };
 
   const onLogout = () => {
@@ -174,6 +208,259 @@ const TeacherDashboardScreen = ({ route, navigation }) => {
     showToast('Bạn đã đăng xuất.', 'info');
     navigation.replace('Login');
   };
+
+  const parseDateTimeInput = useCallback((value) => {
+    const safe = String(value || '').trim();
+    const match = safe.match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})$/);
+    if (!match) return null;
+
+    const [, dd, mm, yyyy, hh, min] = match;
+    const date = new Date(Number(yyyy), Number(mm) - 1, Number(dd), Number(hh), Number(min), 0, 0);
+    if (Number.isNaN(date.getTime())) return null;
+
+    if (
+      date.getDate() !== Number(dd) ||
+      date.getMonth() !== Number(mm) - 1 ||
+      date.getFullYear() !== Number(yyyy) ||
+      date.getHours() !== Number(hh) ||
+      date.getMinutes() !== Number(min)
+    ) {
+      return null;
+    }
+
+    return date;
+  }, []);
+
+  const formatDateTimeInput = useCallback((value) => {
+    if (!value) return '';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+
+    const pad = (num) => String(num).padStart(2, '0');
+    return `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  }, []);
+
+  const buildSessionLink = useCallback(
+    (session) => {
+      if (session?.SessionLink) return session.SessionLink;
+      if (!session?.Id) return '';
+
+      const encodedSessionId = encodeURIComponent(String(session.Id));
+      const encodedJoinCode = session?.JoinCode ? `&joinCode=${encodeURIComponent(String(session.JoinCode))}` : '';
+      return `${API_BASE_URL}/api/public/sessions/access?sessionId=${encodedSessionId}${encodedJoinCode}`;
+    },
+    []
+  );
+
+  const buildSessionQrImageUrl = useCallback(
+    (session) => {
+      if (session?.QrImageUrl) return session.QrImageUrl;
+      const sessionLink = buildSessionLink(session);
+      return sessionLink
+        ? `https://api.qrserver.com/v1/create-qr-code/?size=512x512&data=${encodeURIComponent(sessionLink)}`
+        : '';
+    },
+    [buildSessionLink]
+  );
+
+  const onCopySessionLink = useCallback(
+    async (session) => {
+      const link = buildSessionLink(session);
+      if (!link) {
+        showToast('Không tìm thấy link ca thi.', 'error');
+        return;
+      }
+
+      try {
+        await Clipboard.setStringAsync(link);
+        showToast('Đã sao chép link ca thi.', 'success');
+      } catch (_error) {
+        showToast(link, 'info');
+      }
+    },
+    [buildSessionLink, showToast]
+  );
+
+  const onOpenSessionQr = useCallback(
+    (session) => {
+      setSelectedSessionAction({
+        ...session,
+        SessionLink: buildSessionLink(session),
+        QrImageUrl: buildSessionQrImageUrl(session),
+      });
+      setShowQrModal(true);
+    },
+    [buildSessionLink, buildSessionQrImageUrl]
+  );
+
+  const onOpenSessionManagement = useCallback(
+    (session) => {
+      navigation.navigate('TeacherSessionManagement', {
+        user: displayTeacher || user,
+        session,
+      });
+    },
+    [displayTeacher, navigation, user]
+  );
+
+  const onOpenEditSession = useCallback(
+    async (session) => {
+      if (!displayTeacher?.id || !session?.Id) {
+        showToast('Không tìm thấy thông tin ca thi để sửa.', 'error');
+        return;
+      }
+
+      try {
+        setEditSessionLoading(true);
+        const options = await getTeacherSessionFormOptions(displayTeacher.id);
+        setEditSessionOptions({
+          classrooms: Array.isArray(options?.classrooms) ? options.classrooms : [],
+          examPapers: Array.isArray(options?.examPapers) ? options.examPapers : [],
+        });
+        setEditingSession(session);
+        setEditSessionForm({
+          sessionName: session?.SessionName || '',
+          examPaperId: Number(session?.ExamPaperId) || null,
+          classroomId: Number(session?.ClassroomId) || null,
+          startTime: formatDateTimeInput(session?.StartTime),
+          endTime: formatDateTimeInput(session?.EndTime),
+          sessionPassword: session?.SessionPassword || '',
+          allowViewExplanation: session?.AllowViewExplanation !== false,
+          isShuffled: session?.IsShuffled !== false,
+          shuffleQuestions: session?.ShuffleQuestions !== false,
+          shuffleAnswers: session?.ShuffleAnswers !== false,
+          notes: session?.Notes || '',
+        });
+        setShowEditSessionModal(true);
+      } catch (err) {
+        showToast(err?.response?.data?.message || 'Không tải được dữ liệu sửa ca thi.', 'error');
+      } finally {
+        setEditSessionLoading(false);
+      }
+    },
+    [displayTeacher?.id, formatDateTimeInput, showToast]
+  );
+
+  const onCloseEditSessionModal = useCallback(() => {
+    if (editSessionSubmitting || editSessionLoading) return;
+    setShowEditSessionModal(false);
+    setEditingSession(null);
+    setEditSessionOptions({ classrooms: [], examPapers: [] });
+    setEditSessionForm({
+      sessionName: '',
+      examPaperId: null,
+      classroomId: null,
+      startTime: '',
+      endTime: '',
+      sessionPassword: '',
+      allowViewExplanation: true,
+      isShuffled: true,
+      shuffleQuestions: true,
+      shuffleAnswers: true,
+      notes: '',
+    });
+  }, [editSessionLoading, editSessionSubmitting]);
+
+  const updateEditSessionField = useCallback((field, value) => {
+    setEditSessionForm((prev) => ({ ...prev, [field]: value }));
+  }, []);
+
+  const buildEditSessionPayload = useCallback(() => {
+    const startDate = parseDateTimeInput(editSessionForm.startTime);
+    const endDate = parseDateTimeInput(editSessionForm.endTime);
+
+    if (!editSessionForm.sessionName.trim()) {
+      return { error: 'Tên ca thi là bắt buộc.' };
+    }
+
+    if (!Number.isInteger(editSessionForm.examPaperId)) {
+      return { error: 'Vui lòng chọn đề thi.' };
+    }
+
+    if (!Number.isInteger(editSessionForm.classroomId)) {
+      return { error: 'Vui lòng chọn lớp học.' };
+    }
+
+    if (!startDate || !endDate) {
+      return { error: 'Thời gian không hợp lệ. Dùng định dạng dd/mm/yyyy HH:mm.' };
+    }
+
+    if (endDate <= startDate) {
+      return { error: 'Giờ kết thúc phải sau giờ bắt đầu.' };
+    }
+
+    return {
+      payload: {
+        sessionName: editSessionForm.sessionName.trim(),
+        examPaperId: editSessionForm.examPaperId,
+        classroomId: editSessionForm.classroomId,
+        startTime: startDate.toISOString(),
+        endTime: endDate.toISOString(),
+        sessionPassword: editSessionForm.sessionPassword.trim() || null,
+        allowViewExplanation: Boolean(editSessionForm.allowViewExplanation),
+        isShuffled: Boolean(editSessionForm.isShuffled),
+        shuffleQuestions: Boolean(editSessionForm.shuffleQuestions),
+        shuffleAnswers: Boolean(editSessionForm.shuffleAnswers),
+        notes: editSessionForm.notes.trim() || null,
+      },
+    };
+  }, [editSessionForm, parseDateTimeInput]);
+
+  const onUpdateSession = useCallback(async () => {
+    if (!displayTeacher?.id || !editingSession?.Id) {
+      showToast('Không tìm thấy ca thi để cập nhật.', 'error');
+      return;
+    }
+
+    const { payload, error: payloadError } = buildEditSessionPayload();
+    if (payloadError) {
+      showToast(payloadError, 'error');
+      return;
+    }
+
+    try {
+      setEditSessionSubmitting(true);
+      await updateTeacherSession(displayTeacher.id, editingSession.Id, payload);
+      showToast('Cập nhật ca thi thành công.', 'success');
+      onCloseEditSessionModal();
+      await loadData();
+    } catch (err) {
+      showToast(err?.response?.data?.message || 'Không thể cập nhật ca thi.', 'error');
+    } finally {
+      setEditSessionSubmitting(false);
+    }
+  }, [buildEditSessionPayload, displayTeacher?.id, editingSession?.Id, loadData, onCloseEditSessionModal, showToast]);
+
+  const onOpenDeleteSession = useCallback((session) => {
+    setPendingDeleteSession(session || null);
+    setShowDeleteSessionModal(true);
+  }, []);
+
+  const onCloseDeleteSessionModal = useCallback(() => {
+    if (deletingSession) return;
+    setShowDeleteSessionModal(false);
+    setPendingDeleteSession(null);
+  }, [deletingSession]);
+
+  const onDeleteSession = useCallback(async () => {
+    if (!displayTeacher?.id || !pendingDeleteSession?.Id) {
+      showToast('Không tìm thấy ca thi để xóa.', 'error');
+      return;
+    }
+
+    try {
+      setDeletingSession(true);
+      await deleteTeacherSession(displayTeacher.id, pendingDeleteSession.Id);
+      showToast('Xóa ca thi thành công.', 'success');
+      setShowDeleteSessionModal(false);
+      setPendingDeleteSession(null);
+      await loadData();
+    } catch (err) {
+      showToast(err?.response?.data?.message || 'Không thể xóa ca thi.', 'error');
+    } finally {
+      setDeletingSession(false);
+    }
+  }, [displayTeacher?.id, loadData, pendingDeleteSession?.Id, showToast]);
 
   const filterKeyword = searchText.trim().toLowerCase();
   const filteredClassrooms = useMemo(
@@ -327,7 +614,7 @@ const TeacherDashboardScreen = ({ route, navigation }) => {
         <View className="flex-row items-center justify-between mb-4">
           <Text className="text-xl font-bold text-on-surface">Các ca thi gần đây</Text>
           {compact && filteredSessions.length > 5 && showAllInline ? (
-            <TouchableOpacity onPress={() => setActiveTab('sessions')}>
+            <TouchableOpacity onPress={() => navigation.replace('TeacherSessions', { user: displayTeacher || user })}>
               <Text className="text-primary font-bold">Xem tất cả</Text>
             </TouchableOpacity>
           ) : null}
@@ -338,32 +625,107 @@ const TeacherDashboardScreen = ({ route, navigation }) => {
               const status = getSessionStatus(item);
               const statusStyle = SESSION_STATUS_STYLES[status.label] || SESSION_STATUS_STYLES['Không xác định'];
 
-              return (
-                <View
-                  key={item.Id}
-                  style={ambientShadow}
-                  className="bg-surface-container-lowest p-4 rounded-xl flex-row items-center justify-between"
-                >
-                  <View className="flex-row items-center gap-4 flex-1 min-w-0">
-                    <View className="w-12 h-12 rounded-lg bg-slate-100 flex items-center justify-center">
-                      <MaterialIcons name="event-available" size={24} color="#414754" />
-                    </View>
-                    <View className="flex-1 min-w-0 pr-2">
-                      <Text className="font-bold text-on-surface text-base" numberOfLines={1}>
-                        {item.SessionName}
-                      </Text>
-                      <Text className="text-xs text-on-surface-variant" numberOfLines={1}>
-                        {item.ClassName} - {item.ExamTitle}
-                      </Text>
-                      <Text className="text-xs text-on-surface-variant mt-1">
-                        {formatDateTime(item.StartTime)}
-                      </Text>
+              if (compact) {
+                return (
+                  <View key={item.Id} style={ambientShadow} className="bg-surface-container-lowest p-4 rounded-2xl">
+                    <View className="flex-row items-start gap-3">
+                      <View className="w-11 h-11 rounded-lg bg-slate-100 flex items-center justify-center shrink-0">
+                        <MaterialIcons name="event-available" size={22} color="#414754" />
+                      </View>
+
+                      <View className="flex-1 min-w-0">
+                        <View className="flex-row items-center justify-between gap-3">
+                          <Text className="font-bold text-on-surface text-base flex-1" numberOfLines={1}>
+                            {item.SessionName || '--'}
+                          </Text>
+
+                          <View style={{ backgroundColor: statusStyle.bg, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999 }}>
+                            <Text style={{ color: statusStyle.text, fontSize: 10, fontWeight: '700', textTransform: 'uppercase' }}>
+                              {status.label}
+                            </Text>
+                          </View>
+                        </View>
+
+                        <Text className="text-xs text-on-surface-variant mt-1" numberOfLines={1}>
+                          {formatDateTime(item.StartTime)}
+                        </Text>
+                      </View>
                     </View>
                   </View>
-                  <View style={{ backgroundColor: statusStyle.bg, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999 }}>
-                    <Text style={{ color: statusStyle.text, fontSize: 10, fontWeight: '700', textTransform: 'uppercase' }}>
-                      {status.label}
-                    </Text>
+                );
+              }
+
+              return (
+                <View key={item.Id} style={ambientShadow} className="bg-surface-container-lowest p-4 rounded-2xl">
+                  <View className="flex-row items-start justify-between gap-4">
+                    <View className="flex-row items-center gap-4 flex-1 min-w-0">
+                      <View className="w-12 h-12 rounded-lg bg-slate-100 flex items-center justify-center">
+                        <MaterialIcons name="event-available" size={24} color="#414754" />
+                      </View>
+                      <View className="flex-1 min-w-0 pr-2">
+                        <Text className="font-bold text-on-surface text-base" numberOfLines={1}>
+                          {item.SessionName}
+                        </Text>
+                        <Text className="text-xs text-on-surface-variant" numberOfLines={1}>
+                          {item.ClassName} - {item.ExamTitle}
+                        </Text>
+                        <Text className="text-xs text-on-surface-variant mt-1">
+                          {formatDateTime(item.StartTime)}
+                        </Text>
+                      </View>
+                    </View>
+                    <View className="flex-row items-center gap-2">
+                      <View style={{ backgroundColor: statusStyle.bg, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999 }}>
+                        <Text style={{ color: statusStyle.text, fontSize: 10, fontWeight: '700', textTransform: 'uppercase' }}>
+                          {status.label}
+                        </Text>
+                      </View>
+
+                      <View className="flex-row items-center gap-1">
+                        <TouchableOpacity
+                          className="w-9 h-9 rounded-full items-center justify-center"
+                          style={{ backgroundColor: '#eef2ff' }}
+                          onPress={() => onOpenEditSession(item)}
+                        >
+                          <MaterialIcons name="edit" size={18} color="#0B63C8" />
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          className="w-9 h-9 rounded-full items-center justify-center"
+                          style={{ backgroundColor: '#fee2e2' }}
+                          onPress={() => onOpenDeleteSession(item)}
+                        >
+                          <MaterialIcons name="delete-outline" size={18} color="#B42318" />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  </View>
+
+                  <View className="flex-row items-center justify-between gap-2 mt-4">
+                    <TouchableOpacity
+                      className="flex-1 rounded-2xl px-2 py-3 flex-row items-center justify-center"
+                      style={{ backgroundColor: '#eff3fa' }}
+                      onPress={() => onOpenSessionQr(item)}
+                    >
+                      <MaterialIcons name="qr-code-2" size={15} color="#0B63C8" />
+                      <Text className="text-primary text-sm font-semibold ml-1.5">Xem QR</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      className="flex-1 rounded-2xl px-2 py-3 flex-row items-center justify-center"
+                      style={{ backgroundColor: '#eff3fa' }}
+                      onPress={() => onCopySessionLink(item)}
+                    >
+                      <MaterialIcons name="content-copy" size={15} color="#0B63C8" />
+                      <Text className="text-primary text-sm font-semibold ml-1.5">Lấy Link</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      className="px-2 py-3 flex-row items-center justify-center"
+                      onPress={() => onOpenSessionManagement(item)}
+                    >
+                      <Text className="text-primary text-sm font-semibold">Quản lý</Text>
+                    </TouchableOpacity>
                   </View>
                 </View>
               );
@@ -405,9 +767,6 @@ const TeacherDashboardScreen = ({ route, navigation }) => {
 
   const renderContentByTab = () => {
     if (activeTab === 'exams') return renderExamPapers();
-    if (activeTab === 'sessions') return renderSessions();
-    if (activeTab === 'profile') return renderProfile();
-
     return (
       <>
         {renderSummaryCards()}
@@ -460,9 +819,7 @@ const TeacherDashboardScreen = ({ route, navigation }) => {
           <Text className="mt-6 text-primary text-2xl font-bold tracking-tight mb-1">
             {activeTab === 'home'
               ? 'Tổng quan'
-              : activeTab === 'profile'
-                ? 'Thông tin tài khoản'
-                : bottomNavItems.find((i) => i.key === activeTab)?.label}
+              : bottomNavItems.find((i) => i.key === activeTab)?.label}
           </Text>
           <Text className="text-3xl font-semibold text-on-surface tracking-tight leading-tight" numberOfLines={2}>
             Chào mừng trở lại,{"\n"}{displayTeacher?.fullName || 'Giáo viên'}!
@@ -479,6 +836,294 @@ const TeacherDashboardScreen = ({ route, navigation }) => {
           {renderContentByTab()}
         </Animated.View>
       </ScrollView>
+
+      <Modal visible={showQrModal} transparent animationType="fade" onRequestClose={() => setShowQrModal(false)}>
+        <Pressable
+          className="flex-1 items-center justify-center px-4"
+          style={{ backgroundColor: 'rgba(0, 0, 0, 0.55)' }}
+          onPress={() => setShowQrModal(false)}
+        >
+          <Pressable
+            className="w-full max-w-xl rounded-3xl bg-surface-container-lowest px-5 py-5"
+            onPress={(event) => event.stopPropagation()}
+          >
+            <View className="flex-row items-center justify-between mb-3">
+              <Text className="text-on-surface text-xl font-bold">QR vào ca thi</Text>
+              <TouchableOpacity onPress={() => setShowQrModal(false)}>
+                <MaterialIcons name="close" size={24} color="#64748b" />
+              </TouchableOpacity>
+            </View>
+
+            <View className="items-center mt-4">
+              {selectedSessionAction?.QrImageUrl ? (
+                <Image
+                  source={{ uri: selectedSessionAction.QrImageUrl }}
+                  style={{ width: 220, height: 220, borderRadius: 12 }}
+                  resizeMode="contain"
+                />
+              ) : null}
+            </View>
+
+            <TouchableOpacity
+              className="h-11 mt-4 rounded-xl bg-primary items-center justify-center flex-row"
+              onPress={() => onCopySessionLink(selectedSessionAction)}
+            >
+              <MaterialIcons name="content-copy" size={18} color="#FFFFFF" />
+              <Text className="text-white font-bold ml-2">Sao chép link ca thi</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal visible={showDeleteSessionModal} transparent animationType="fade" onRequestClose={onCloseDeleteSessionModal}>
+        <Pressable
+          className="flex-1 items-center justify-center px-4"
+          style={{ backgroundColor: 'rgba(0, 0, 0, 0.55)' }}
+          onPress={onCloseDeleteSessionModal}
+        >
+          <Pressable
+            className="w-full max-w-md rounded-3xl bg-surface-container-lowest p-5"
+            onPress={(event) => event.stopPropagation()}
+          >
+            <View className="flex-row items-center mb-3">
+              <View className="w-11 h-11 rounded-2xl bg-red-50 items-center justify-center mr-3">
+                <MaterialIcons name="delete-outline" size={22} color="#B42318" />
+              </View>
+              <Text className="text-lg font-bold text-on-surface">Xóa ca thi</Text>
+            </View>
+
+            <Text className="text-on-surface-variant leading-5 mb-5">
+              Bạn có chắc muốn xóa ca thi {pendingDeleteSession?.SessionName ? `"${pendingDeleteSession.SessionName}"` : 'này'}?
+            </Text>
+
+            <View className="flex-row items-center justify-end gap-2">
+              <TouchableOpacity
+                onPress={onCloseDeleteSessionModal}
+                disabled={deletingSession}
+                className="h-11 px-4 rounded-xl bg-surface-container-high items-center justify-center"
+              >
+                <Text className="text-on-surface font-semibold">Hủy</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={onDeleteSession}
+                disabled={deletingSession}
+                className="h-11 px-4 rounded-xl bg-red-600 items-center justify-center flex-row"
+              >
+                {deletingSession ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <>
+                    <MaterialIcons name="delete" size={16} color="#FFFFFF" />
+                    <Text className="text-white font-bold ml-1">Xóa ca thi</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal visible={showEditSessionModal} transparent animationType="fade" onRequestClose={onCloseEditSessionModal}>
+        <Pressable
+          className="flex-1 items-center justify-center px-4"
+          style={{ backgroundColor: 'rgba(0, 0, 0, 0.55)' }}
+          onPress={onCloseEditSessionModal}
+        >
+          <Pressable
+            className="w-full max-w-xl rounded-3xl bg-surface-container-lowest overflow-hidden"
+            onPress={(event) => event.stopPropagation()}
+          >
+            <View className="px-5 pt-5 pb-4 border-b" style={{ borderColor: '#c1c6d64d' }}>
+              <View className="flex-row items-center justify-between">
+                <View className="flex-row items-center">
+                  <View className="w-10 h-10 rounded-2xl bg-blue-100 items-center justify-center mr-3">
+                    <MaterialIcons name="edit" size={20} color="#0B63C8" />
+                  </View>
+                  <Text className="text-on-surface text-2xl font-bold">Sửa ca thi</Text>
+                </View>
+                <TouchableOpacity onPress={onCloseEditSessionModal} disabled={editSessionSubmitting || editSessionLoading}>
+                  <MaterialIcons name="close" size={24} color="#727785" />
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {editSessionLoading ? (
+              <View className="items-center justify-center py-12">
+                <ActivityIndicator size="large" color="#005bbf" />
+                <Text className="mt-3 text-on-surface-variant">Đang tải dữ liệu sửa ca thi...</Text>
+              </View>
+            ) : (
+              <ScrollView className="px-5" style={{ maxHeight: 560 }}>
+                <View className="pt-4 pb-6">
+                  <Text className="text-xs font-bold text-primary uppercase tracking-wider mb-3">Thông tin cơ bản</Text>
+
+                  <Text className="text-xs uppercase font-bold text-on-surface-variant mb-2">Tên ca thi *</Text>
+                  <TextInput
+                    value={editSessionForm.sessionName}
+                    onChangeText={(value) => updateEditSessionField('sessionName', value)}
+                    placeholder="Ví dụ: Kiểm tra cuối kỳ - Môn Toán"
+                    placeholderTextColor="#9AA3B2"
+                    className="h-12 rounded-2xl border border-outline px-4 text-base text-on-surface bg-surface-container-lowest"
+                  />
+
+                  <Text className="text-xs uppercase font-bold text-on-surface-variant mb-2 mt-4">Đề thi *</Text>
+                  <TouchableOpacity
+                    className="h-12 rounded-2xl border border-outline px-4 flex-row items-center justify-between bg-surface-container-lowest"
+                    onPress={async () => {
+                      if (!editSessionOptions.examPapers.length && displayTeacher?.id) {
+                        const options = await getTeacherSessionFormOptions(displayTeacher.id);
+                        setEditSessionOptions({
+                          classrooms: Array.isArray(options?.classrooms) ? options.classrooms : [],
+                          examPapers: Array.isArray(options?.examPapers) ? options.examPapers : [],
+                        });
+                      }
+                    }}
+                  >
+                    <Text className="text-sm text-on-surface-variant flex-1 mr-3" numberOfLines={1}>
+                      {editSessionOptions.examPapers.find((item) => item.Id === editSessionForm.examPaperId)
+                        ? `${editSessionOptions.examPapers.find((item) => item.Id === editSessionForm.examPaperId).Title}`
+                        : 'Chọn đề thi từ thư viện'}
+                    </Text>
+                    <MaterialIcons name="expand-more" size={20} color="#727785" />
+                  </TouchableOpacity>
+                  <View className="mt-2 flex-row flex-wrap gap-2">
+                    {editSessionOptions.examPapers.slice(0, 8).map((item) => (
+                      <TouchableOpacity
+                        key={item.Id}
+                        className="px-3 py-2 rounded-xl"
+                        style={{ backgroundColor: editSessionForm.examPaperId === item.Id ? '#eaf1ff' : '#f6f7fb' }}
+                        onPress={() => updateEditSessionField('examPaperId', item.Id)}
+                      >
+                        <Text className="text-xs font-semibold text-on-surface" numberOfLines={1}>
+                          {item.Title}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+
+                  <Text className="text-xs uppercase font-bold text-on-surface-variant mb-2 mt-4">Lớp học tham gia *</Text>
+                  <TouchableOpacity
+                    className="h-12 rounded-2xl border border-outline px-4 flex-row items-center justify-between bg-surface-container-lowest"
+                    onPress={async () => {
+                      if (!editSessionOptions.classrooms.length && displayTeacher?.id) {
+                        const options = await getTeacherSessionFormOptions(displayTeacher.id);
+                        setEditSessionOptions({
+                          classrooms: Array.isArray(options?.classrooms) ? options.classrooms : [],
+                          examPapers: Array.isArray(options?.examPapers) ? options.examPapers : [],
+                        });
+                      }
+                    }}
+                  >
+                    <Text className="text-sm text-on-surface-variant flex-1 mr-3" numberOfLines={1}>
+                      {editSessionOptions.classrooms.find((item) => item.Id === editSessionForm.classroomId)
+                        ? `${editSessionOptions.classrooms.find((item) => item.Id === editSessionForm.classroomId).ClassName}`
+                        : 'Chọn lớp học'}
+                    </Text>
+                    <MaterialIcons name="expand-more" size={20} color="#727785" />
+                  </TouchableOpacity>
+                  <View className="mt-2 flex-row flex-wrap gap-2">
+                    {editSessionOptions.classrooms.slice(0, 8).map((item) => (
+                      <TouchableOpacity
+                        key={item.Id}
+                        className="px-3 py-2 rounded-xl"
+                        style={{ backgroundColor: editSessionForm.classroomId === item.Id ? '#eaf1ff' : '#f6f7fb' }}
+                        onPress={() => updateEditSessionField('classroomId', item.Id)}
+                      >
+                        <Text className="text-xs font-semibold text-on-surface" numberOfLines={1}>
+                          {item.ClassName}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+
+                  <Text className="text-xs font-bold text-primary uppercase tracking-wider mt-6 mb-3">Thời gian</Text>
+
+                  <Text className="text-xs uppercase font-bold text-on-surface-variant mb-2">Giờ bắt đầu *</Text>
+                  <TextInput
+                    value={editSessionForm.startTime}
+                    onChangeText={(value) => updateEditSessionField('startTime', value)}
+                    placeholder="dd/mm/yyyy HH:mm"
+                    placeholderTextColor="#9AA3B2"
+                    className="h-12 rounded-2xl border border-outline px-4 text-base text-on-surface bg-surface-container-lowest"
+                  />
+
+                  <Text className="text-xs uppercase font-bold text-on-surface-variant mb-2 mt-4">Giờ kết thúc *</Text>
+                  <TextInput
+                    value={editSessionForm.endTime}
+                    onChangeText={(value) => updateEditSessionField('endTime', value)}
+                    placeholder="dd/mm/yyyy HH:mm"
+                    placeholderTextColor="#9AA3B2"
+                    className="h-12 rounded-2xl border border-outline px-4 text-base text-on-surface bg-surface-container-lowest"
+                  />
+
+                  <Text className="text-xs font-bold text-primary uppercase tracking-wider mt-6 mb-3">Bảo mật & hiển thị</Text>
+
+                  <Text className="text-xs uppercase font-bold text-on-surface-variant mb-2">Mật khẩu phòng (tùy chọn)</Text>
+                  <TextInput
+                    value={editSessionForm.sessionPassword}
+                    onChangeText={(value) => updateEditSessionField('sessionPassword', value)}
+                    placeholder="Nhập mã bảo mật"
+                    placeholderTextColor="#9AA3B2"
+                    className="h-12 rounded-2xl border border-outline px-4 text-base text-on-surface bg-surface-container-lowest"
+                  />
+
+                  <View className="mt-4 p-4 rounded-2xl" style={{ backgroundColor: '#eef2ff' }}>
+                    {[
+                      { key: 'allowViewExplanation', label: 'Công bố lời giải sau khi làm xong' },
+                      { key: 'shuffleQuestions', label: 'Xáo trộn câu hỏi' },
+                      { key: 'shuffleAnswers', label: 'Xáo trộn đáp án' },
+                      { key: 'isShuffled', label: 'Bật trộn tổng thể' },
+                    ].map((item) => (
+                      <TouchableOpacity
+                        key={item.key}
+                        className="flex-row items-center mb-3 last:mb-0"
+                        onPress={() => updateEditSessionField(item.key, !editSessionForm[item.key])}
+                      >
+                        <MaterialIcons
+                          name={editSessionForm[item.key] ? 'check-box' : 'check-box-outline-blank'}
+                          size={20}
+                          color="#0B63C8"
+                        />
+                        <Text className="text-on-surface text-base ml-3 flex-1">{item.label}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+
+                  <Text className="text-xs uppercase font-bold text-on-surface-variant mb-2 mt-4">Ghi chú (tùy chọn)</Text>
+                  <TextInput
+                    value={editSessionForm.notes}
+                    onChangeText={(value) => updateEditSessionField('notes', value)}
+                    placeholder="Ví dụ: Học sinh được phép sử dụng máy tính bỏ túi..."
+                    placeholderTextColor="#9AA3B2"
+                    multiline
+                    textAlignVertical="top"
+                    className="rounded-2xl border border-outline px-4 py-3 text-base text-on-surface bg-surface-container-lowest"
+                    style={{ minHeight: 92 }}
+                  />
+                </View>
+              </ScrollView>
+            )}
+
+            <View className="px-5 py-4 border-t" style={{ borderColor: '#c1c6d64d' }}>
+              <TouchableOpacity
+                className="h-11 rounded-xl bg-primary items-center justify-center flex-row"
+                onPress={onUpdateSession}
+                disabled={editSessionSubmitting || editSessionLoading}
+              >
+                {editSessionSubmitting ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <>
+                    <MaterialIcons name="save" size={18} color="#FFFFFF" />
+                    <Text className="text-white font-bold ml-1">Lưu thay đổi</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </TeacherScreenShell>
   );
 };
