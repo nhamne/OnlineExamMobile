@@ -569,14 +569,53 @@ app.get('/api/dashboard/teacher/:userId', async (req, res) => {
           (SELECT COUNT(*)
              FROM ExamSessions es
              INNER JOIN Classrooms c ON c.Id = es.ClassroomId
-            WHERE c.TeacherId = @teacherId AND c.IsDeleted = 0
+             INNER JOIN ExamPapers ep ON ep.Id = es.ExamPaperId
+            WHERE c.TeacherId = @teacherId AND c.IsDeleted = 0 AND es.IsDeleted = 0 AND ep.IsDeleted = 0
           ) AS SessionCount,
           (SELECT COUNT(*)
              FROM ExamSessions es
              INNER JOIN Classrooms c ON c.Id = es.ClassroomId
-            WHERE c.TeacherId = @teacherId AND c.IsDeleted = 0 AND es.EndTime >= GETDATE()
+             INNER JOIN ExamPapers ep ON ep.Id = es.ExamPaperId
+            WHERE c.TeacherId = @teacherId AND c.IsDeleted = 0 AND es.IsDeleted = 0 AND ep.IsDeleted = 0 AND es.EndTime >= GETDATE()
           ) AS UpcomingSessionCount
       `);
+
+    const statsResult = await pool
+      .request()
+      .input('teacherId', sql.Int, userId)
+      .query(`
+        SELECT COUNT(*) AS TotalStudents
+        FROM ClassroomMembers cm 
+        INNER JOIN Classrooms c ON c.Id = cm.ClassroomId 
+        WHERE c.TeacherId = @teacherId AND c.IsDeleted = 0
+      `);
+
+    const mostPopulousClassResult = await pool.request().input('teacherId', sql.Int, userId).query(`
+      SELECT TOP 1 
+        c.ClassName, 
+        COUNT(cm.StudentId) AS StudentCount
+      FROM Classrooms c
+      LEFT JOIN ClassroomMembers cm ON c.Id = cm.ClassroomId
+      WHERE c.TeacherId = @teacherId AND c.IsDeleted = 0
+      GROUP BY c.Id, c.ClassName, c.CreatedAt
+      ORDER BY StudentCount DESC, c.CreatedAt DESC, c.Id DESC
+    `);
+
+    const longestExamResult = await pool.request().input('teacherId', sql.Int, userId).query(`
+      SELECT TOP 1 Title, DurationInMinutes
+      FROM ExamPapers 
+      WHERE TeacherId = @teacherId AND IsDeleted = 0
+      ORDER BY DurationInMinutes DESC, CreatedAt DESC, Id DESC
+    `);
+
+    const mostQuestionsExamResult = await pool.request().input('teacherId', sql.Int, userId).query(`
+      SELECT TOP 1 
+        ep.Title, 
+        (SELECT COUNT(*) FROM Questions q WHERE q.ExamPaperId = ep.Id) AS QuestionCount
+      FROM ExamPapers ep 
+      WHERE ep.TeacherId = @teacherId AND ep.IsDeleted = 0
+      ORDER BY QuestionCount DESC, ep.CreatedAt DESC, ep.Id DESC
+    `);
 
     const recentClassroomsResult = await pool
       .request()
@@ -630,12 +669,19 @@ app.get('/api/dashboard/teacher/:userId', async (req, res) => {
         WHERE c.TeacherId = @teacherId
           AND c.IsDeleted = 0
           AND ep.IsDeleted = 0
+          AND es.IsDeleted = 0
         ORDER BY es.StartTime DESC, es.Id DESC
       `);
 
     return res.json({
       teacher: sanitizeUser(teacherCheck.recordset[0]),
-      summary: summaryResult.recordset[0],
+      summary: {
+        ...summaryResult.recordset[0],
+        TotalStudents: statsResult.recordset[0]?.TotalStudents || 0,
+        MostPopulousClass: mostPopulousClassResult.recordset[0] || null,
+        LongestExam: longestExamResult.recordset[0] || null,
+        MostQuestionsExam: mostQuestionsExamResult.recordset[0] || null,
+      },
       classrooms: recentClassroomsResult.recordset,
       examPapers: recentExamPapersResult.recordset,
       sessions: upcomingSessionsResult.recordset,
@@ -2788,6 +2834,19 @@ app.delete('/api/dashboard/teacher/:userId/exams/:examId', async (req, res) => {
 
     if (examCheck.recordset.length === 0) {
       return res.status(404).json({ message: 'Exam paper not found or not owned by teacher.' });
+    }
+
+    const activeSessionsCheck = await pool
+      .request()
+      .input('examId', sql.Int, examId)
+      .query(`
+        SELECT TOP 1 Id
+        FROM ExamSessions
+        WHERE ExamPaperId = @examId AND IsDeleted = 0
+      `);
+
+    if (activeSessionsCheck.recordset.length > 0) {
+      return res.status(400).json({ message: 'Không thể xoá vì đề thi này đã được gán vào ca thi.' });
     }
 
     await pool

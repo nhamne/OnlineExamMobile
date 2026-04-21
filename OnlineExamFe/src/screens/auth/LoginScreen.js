@@ -122,121 +122,121 @@ const LoginScreen = ({ navigation }) => {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         className="flex-1"
       >
-        <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center' }} keyboardShouldPersistTaps="handled">
+        <ScrollView contentContainerStyle={{ flexGrow: 1 }} keyboardShouldPersistTaps="handled">
+          <View style={{ flex: 1 }} />
           <View className="flex-none bg-surface-container-lowest rounded-xl m-4 p-6 shadow-sm mb-4">
-          <View className="flex-row items-center gap-2 mb-8">
-            <MaterialIcons name="menu-book" size={32} color="#005bbf" />
-            <Text className="text-xl font-black text-primary tracking-tighter">Online Exam</Text>
-          </View>
-
-          <RoleSegmentedControl value={role} onChange={setRole} />
-
-          <Animated.View
-            className="mb-8"
-            style={{
-              opacity: slideAnim.interpolate({ inputRange: [0, 18], outputRange: [1, 0.78] }),
-              transform: [{ translateX: slideAnim }],
-            }}
-          >
-            <Text className="text-3xl font-bold tracking-tight text-on-surface mb-2">
-              {roleCopy.title}
-            </Text>
-            <Text className="text-on-surface-variant font-medium">{roleCopy.subtitle}</Text>
-          </Animated.View>
-
-
-
-          <Animated.View
-            style={{
-              opacity: slideAnim.interpolate({ inputRange: [0, 18], outputRange: [1, 0.84] }),
-              transform: [{ translateX: slideAnim }],
-            }}
-          >
-            <View className="space-y-2 mb-4">
-              <Text className="mt-4 text-sm font-semibold tracking-wide text-on-surface-variant mb-1">
-                Email
-              </Text>
-              <View className="flex-row items-center bg-surface-container-highest rounded-xl px-4 h-14 border" style={{ borderColor: '#c1c6d680' }}>
-                <MaterialIcons name="mail-outline" size={20} color="#727785" />
-                <TextInput
-                  className="flex-1 ml-3 text-on-surface font-body text-base"
-                  placeholder="email@vi-du.com"
-                  placeholderTextColor="#727785"
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  value={email}
-                  onChangeText={setEmail}
-                  style={webInputFixStyle}
-                />
-              </View>
+            <View className="flex-row items-center gap-2 mb-8">
+              <MaterialIcons name="menu-book" size={32} color="#005bbf" />
+              <Text className="text-xl font-black text-primary tracking-tighter">Online Exam</Text>
             </View>
 
-            <View className="space-y-2 mb-6">
-              <Text className="text-sm font-semibold tracking-wide text-on-surface-variant mb-1">
-                Mật khẩu
+            <RoleSegmentedControl value={role} onChange={setRole} />
+
+            <Animated.View
+              className="mb-8"
+              style={{
+                opacity: slideAnim.interpolate({ inputRange: [0, 18], outputRange: [1, 0.78] }),
+                transform: [{ translateX: slideAnim }],
+              }}
+            >
+              <Text className="text-3xl font-bold tracking-tight text-on-surface mb-2">
+                {roleCopy.title}
               </Text>
-              <View className="flex-row items-center bg-surface-container-highest rounded-xl px-4 h-14 border" style={{ borderColor: '#c1c6d680' }}>
-                <MaterialIcons name="lock-outline" size={20} color="#727785" />
-                <TextInput
-                  className="flex-1 ml-3 text-on-surface font-body text-base"
-                  placeholder="••••••••"
-                  placeholderTextColor="#727785"
-                  secureTextEntry={!showPassword}
-                  value={password}
-                  onChangeText={setPassword}
-                  style={webInputFixStyle}
-                />
-                <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
-                  <MaterialIcons
-                    name={showPassword ? 'visibility-off' : 'visibility'}
-                    size={20}
-                    color="#727785"
+              <Text className="text-on-surface-variant font-medium">{roleCopy.subtitle}</Text>
+            </Animated.View>
+
+            <Animated.View
+              style={{
+                opacity: slideAnim.interpolate({ inputRange: [0, 18], outputRange: [1, 0.84] }),
+                transform: [{ translateX: slideAnim }],
+              }}
+            >
+              <View className="space-y-2 mb-4">
+                <Text className="mt-4 text-sm font-semibold tracking-wide text-on-surface-variant mb-1">
+                  Email
+                </Text>
+                <View className="flex-row items-center bg-surface-container-highest rounded-xl px-4 h-14 border" style={{ borderColor: '#c1c6d680' }}>
+                  <MaterialIcons name="mail-outline" size={20} color="#727785" />
+                  <TextInput
+                    className="flex-1 ml-3 text-on-surface font-body text-base"
+                    placeholder="email@vi-du.com"
+                    placeholderTextColor="#727785"
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    value={email}
+                    onChangeText={setEmail}
+                    style={webInputFixStyle}
                   />
+                </View>
+              </View>
+
+              <View className="space-y-2 mb-6">
+                <Text className="text-sm font-semibold tracking-wide text-on-surface-variant mb-1">
+                  Mật khẩu
+                </Text>
+                <View className="flex-row items-center bg-surface-container-highest rounded-xl px-4 h-14 border" style={{ borderColor: '#c1c6d680' }}>
+                  <MaterialIcons name="lock-outline" size={20} color="#727785" />
+                  <TextInput
+                    className="flex-1 ml-3 text-on-surface font-body text-base"
+                    placeholder="••••••••"
+                    placeholderTextColor="#727785"
+                    secureTextEntry={!showPassword}
+                    value={password}
+                    onChangeText={setPassword}
+                    style={webInputFixStyle}
+                  />
+                  <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
+                    <MaterialIcons
+                      name={showPassword ? 'visibility-off' : 'visibility'}
+                      size={20}
+                      color="#727785"
+                    />
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              <View className="flex-row items-center justify-between mb-8">
+                <TouchableOpacity
+                  className="flex-row items-center gap-2"
+                  onPress={() => setRememberMe(!rememberMe)}
+                >
+                  <View
+                    className="w-5 h-5 border-2 rounded flex items-center justify-center"
+                    style={{ backgroundColor: rememberMe ? '#005bbf' : 'transparent', borderColor: rememberMe ? '#005bbf' : '#c1c6d6' }}
+                  >
+                    {rememberMe && <MaterialIcons name="check" size={14} color="white" />}
+                  </View>
+                  <Text className="text-sm font-medium text-on-surface-variant">
+                    Ghi nhớ đăng nhập
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity>
+                  <Text className="text-sm font-bold text-primary">Quên mật khẩu?</Text>
                 </TouchableOpacity>
               </View>
-            </View>
 
-            <View className="flex-row items-center justify-between mb-8">
               <TouchableOpacity
-                className="flex-row items-center gap-2"
-                onPress={() => setRememberMe(!rememberMe)}
+                className="w-full bg-primary py-4 rounded-lg items-center shadow-md mb-8"
+                onPress={onLogin}
+                disabled={loading}
               >
-                <View
-                  className="w-5 h-5 border-2 rounded flex items-center justify-center"
-                  style={{ backgroundColor: rememberMe ? '#005bbf' : 'transparent', borderColor: rememberMe ? '#005bbf' : '#c1c6d6' }}
-                >
-                  {rememberMe && <MaterialIcons name="check" size={14} color="white" />}
-                </View>
-                <Text className="text-sm font-medium text-on-surface-variant">
-                  Ghi nhớ đăng nhập
-                </Text>
+                {loading ? (
+                  <ActivityIndicator color="#ffffff" />
+                ) : (
+                  <Text className="text-white font-bold text-base">Đăng nhập</Text>
+                )}
               </TouchableOpacity>
-              <TouchableOpacity>
-                <Text className="text-sm font-bold text-primary">Quên mật khẩu?</Text>
+            </Animated.View>
+
+            <View className="flex-row justify-center">
+              <Text className="text-on-surface-variant font-medium">Chưa có tài khoản? </Text>
+              <TouchableOpacity onPress={() => navigation.navigate('Register')}>
+                <Text className="text-primary font-bold">Đăng ký ngay</Text>
               </TouchableOpacity>
             </View>
-
-            <TouchableOpacity
-              className="w-full bg-primary py-4 rounded-lg items-center shadow-md mb-8"
-              onPress={onLogin}
-              disabled={loading}
-            >
-              {loading ? (
-                <ActivityIndicator color="#ffffff" />
-              ) : (
-                <Text className="text-white font-bold text-base">Đăng nhập</Text>
-              )}
-            </TouchableOpacity>
-          </Animated.View>
-
-          <View className="flex-row justify-center">
-            <Text className="text-on-surface-variant font-medium">Chưa có tài khoản? </Text>
-            <TouchableOpacity onPress={() => navigation.navigate('Register')}>
-              <Text className="text-primary font-bold">Đăng ký ngay</Text>
-            </TouchableOpacity>
           </View>
-        </View>
+          <View style={{ flex: 1, minHeight: 40 }} />
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>

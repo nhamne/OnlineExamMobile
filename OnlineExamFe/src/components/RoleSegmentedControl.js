@@ -25,7 +25,7 @@ const RoleSegmentedControl = ({ value, onChange }) => {
 
   return (
     <View
-      className="mt-4 relative flex-row bg-surface-container-highest rounded-2xl mb-6 overflow-hidden border border-outline-variant"
+      className="mt-4 relative flex-row bg-surface-container-highest rounded-2xl mb-6 border border-outline-variant"
       style={{ padding: insets, position: 'relative' }}
       onLayout={(event) => setContainerWidth(event.nativeEvent.layout.width)}
     >
@@ -36,11 +36,16 @@ const RoleSegmentedControl = ({ value, onChange }) => {
           borderRadius: 12,
           position: 'absolute',
           top: insets,
+          bottom: insets,
           left: insets,
-          height: 44,
           width: indicatorWidth,
           backgroundColor: 'white',
           transform: [{ translateX }],
+          elevation: 1, // Adds standard shadow on Android to match iOS shadow if you added any, and fixes rendering
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: 1 },
+          shadowOpacity: 0.05,
+          shadowRadius: 2,
         }}
       />
 
