@@ -57,6 +57,9 @@ const AppNavigator = ({ initialRouteName = 'Login', initialUser = null }) => {
 				<Stack.Screen
 					name="TeacherSessionManagement"
 					component={SessionManagementScreen}
+					initialParams={{ user: initialUser }}
+				/>
+				<Stack.Screen
 					name="TeacherExamEditor"
 					component={ExamEditorContent}
 					initialParams={{ user: initialUser }}

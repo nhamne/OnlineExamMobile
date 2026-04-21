@@ -23,7 +23,7 @@ import {
 } from '../../services/authService';
 
 const COLORS = {
-  primary: '#00357f',
+  primary: '#005BBF',
   primaryContainer: '#004aad',
   surface: '#f7f9fb',
   surfaceContainerLow: '#f2f4f6',
@@ -568,20 +568,49 @@ export default function ExamDetailScreen({ navigation, route }) {
         navigation.dispatch(event.data.action);
       };
 
-      if (Platform.OS === 'web') {
-        const shouldSave = window.confirm('Bạn có muốn lưu thay đổi trước khi rời đi không?');
-        confirmAction(shouldSave);
-        return;
-      }
-
-      Alert.alert(
-        'Chưa lưu thay đổi',
-        'Bạn có muốn lưu thay đổi trước khi rời đi không?',
-        [
-          { text: 'Không lưu', style: 'destructive', onPress: () => confirmAction(false) },
-          { text: 'Lưu', onPress: () => confirmAction(true) },
-        ]
-      );
+      setShowConfirmModal(true);
+      confirmActionRef.current = confirmAction;
+      return;
+      // Modal xác nhận cập nhật đề thi
+      const [showConfirmModal, setShowConfirmModal] = useState(false);
+      const confirmActionRef = useRef(null);
+      const handleConfirmSave = (shouldSave) => {
+        setShowConfirmModal(false);
+        if (confirmActionRef.current) {
+          confirmActionRef.current(shouldSave);
+          confirmActionRef.current = null;
+        }
+      };
+          <Modal
+            visible={showConfirmModal}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setShowConfirmModal(false)}
+          >
+            <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'center', alignItems: 'center' }}>
+              <View style={{ backgroundColor: '#fff', borderRadius: 16, padding: 24, minWidth: 280, alignItems: 'center' }}>
+                <MaterialIcons name="help-outline" size={36} color={COLORS.primary} style={{ marginBottom: 12 }} />
+                <Text style={{ fontWeight: 'bold', fontSize: 16, marginBottom: 8 }}>Chưa lưu thay đổi</Text>
+                <Text style={{ color: COLORS.onSurfaceVariant, textAlign: 'center', marginBottom: 20 }}>
+                  Bạn có muốn lưu thay đổi trước khi rời đi không?
+                </Text>
+                <View style={{ flexDirection: 'row', gap: 12 }}>
+                  <TouchableOpacity
+                    style={{ backgroundColor: '#e5e7eb', borderRadius: 8, paddingVertical: 10, paddingHorizontal: 24 }}
+                    onPress={() => handleConfirmSave(false)}
+                  >
+                    <Text style={{ color: COLORS.onSurface, fontWeight: 'bold', fontSize: 15 }}>Không lưu</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={{ backgroundColor: COLORS.primary, borderRadius: 8, paddingVertical: 10, paddingHorizontal: 24 }}
+                    onPress={() => handleConfirmSave(true)}
+                  >
+                    <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>Lưu</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          </Modal>
     });
 
     return beforeRemove;

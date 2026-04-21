@@ -134,6 +134,9 @@ export async function deleteTeacherSession(userId, sessionId) {
 
 export async function getTeacherSessionDetail(userId, sessionId) {
   const response = await api.get(`/api/dashboard/teacher/${userId}/session-detail/${sessionId}`);
+  return response.data;
+}
+
 export async function createTeacherExam(userId, payload) {
   const response = await api.post(`/api/dashboard/teacher/${userId}/exams`, payload);
   return response.data;

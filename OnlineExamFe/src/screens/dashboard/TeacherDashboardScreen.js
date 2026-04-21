@@ -25,13 +25,13 @@ import { API_BASE_URL } from '../../config/api';
 import { useToast } from '../../context/ToastContext';
 import { clearAuthSession } from '../../services/authSession';
 import {
+  copyTeacherExam,
+  deleteTeacherExam,
   deleteTeacherSession,
   getTeacherDashboard,
   getTeacherSessionFormOptions,
   updateTeacherSession,
 } from '../../services/authService';
-import { API_BASE_URL } from '../../config/api';
-import { copyTeacherExam, deleteTeacherExam, getTeacherDashboard } from '../../services/authService';
 
 const bottomNavItems = [
   { key: 'home', label: 'Trang chủ', shortLabel: 'Home', icon: 'home' },
@@ -62,7 +62,7 @@ const SESSION_STATUS_STYLES = {
 };
 
 const EXAM_COLORS = {
-  primary: '#00357f',
+  primary: '#005BBF',
   background: '#f7f9fb',
   surface: '#ffffff',
   surfaceContainerLow: '#f2f4f6',
@@ -149,6 +149,9 @@ const TeacherDashboardScreen = ({ route, navigation }) => {
   const [showDeleteSessionModal, setShowDeleteSessionModal] = useState(false);
   const [deletingSession, setDeletingSession] = useState(false);
   const [pendingDeleteSession, setPendingDeleteSession] = useState(null);
+  const [showDeleteExamModal, setShowDeleteExamModal] = useState(false);
+  const [deletingExam, setDeletingExam] = useState(false);
+  const [pendingDeleteExam, setPendingDeleteExam] = useState(null);
   const [showEditSessionModal, setShowEditSessionModal] = useState(false);
   const [editingSession, setEditingSession] = useState(null);
   const [editSessionLoading, setEditSessionLoading] = useState(false);
@@ -484,54 +487,6 @@ const TeacherDashboardScreen = ({ route, navigation }) => {
     const { payload, error: payloadError } = buildEditSessionPayload();
     if (payloadError) {
       showToast(payloadError, 'error');
-  const openExamMenu = (item) => {
-    setMenuExamId(item?.Id || null);
-  };
-
-  const closeExamMenu = () => {
-    setMenuExamId(null);
-  };
-
-  const handleDeleteExam = async (item) => {
-    if (!user?.id || !item?.Id) {
-      showToast('Không tìm thấy thông tin đề thi.', 'error');
-      return;
-    }
-
-    const confirmDelete = async () => {
-      try {
-        await deleteTeacherExam(user.id, item.Id);
-        setExamPapers((prev) => prev.filter((exam) => exam.Id !== item.Id));
-        setSummary((prev) => {
-          if (!prev) return prev;
-          const nextCount = Math.max(0, Number(prev.ExamPaperCount ?? 0) - 1);
-          return { ...prev, ExamPaperCount: nextCount };
-        });
-        showToast('Đã xóa đề thi.', 'success');
-      } catch (err) {
-        showToast(err?.response?.data?.message || 'Không thể xóa đề thi.', 'error');
-      } finally {
-        closeExamMenu();
-      }
-    };
-
-    if (Platform.OS === 'web') {
-      const confirmed = window.confirm('Bạn chắc chắn muốn xóa đề thi này?');
-      if (confirmed) {
-        confirmDelete();
-      }
-      return;
-    }
-
-    Alert.alert('Xóa đề thi', 'Bạn chắc chắn muốn xóa đề thi này?', [
-      { text: 'Hủy', style: 'cancel' },
-      { text: 'Xóa', style: 'destructive', onPress: confirmDelete },
-    ]);
-  };
-
-  const handleCopyExam = async (item) => {
-    if (!user?.id || !item?.Id) {
-      showToast('Không tìm thấy thông tin đề thi.', 'error');
       return;
     }
 
@@ -578,6 +533,68 @@ const TeacherDashboardScreen = ({ route, navigation }) => {
       setDeletingSession(false);
     }
   }, [displayTeacher?.id, loadData, pendingDeleteSession?.Id, showToast]);
+
+  const openExamMenu = (item) => {
+    setMenuExamId(item?.Id || null);
+  };
+
+  const closeExamMenu = () => {
+    setMenuExamId(null);
+  };
+
+  const handleDeleteExam = (item) => {
+    if (!user?.id || !item?.Id) {
+      showToast('Không tìm thấy thông tin đề thi.', 'error');
+      return;
+    }
+
+    const isExamUsed = sessions.some((session) => Number(session.ExamPaperId) === Number(item.Id));
+    if (isExamUsed) {
+      showToast('Không thể xoá vì đề thi này đang được sử dụng trong ca thi.', 'error');
+      closeExamMenu();
+      return;
+    }
+
+    setPendingDeleteExam(item);
+    setShowDeleteExamModal(true);
+    closeExamMenu();
+  };
+
+  const onCloseDeleteExamModal = () => {
+    if (deletingExam) return;
+    setShowDeleteExamModal(false);
+    setPendingDeleteExam(null);
+  };
+
+  const onConfirmDeleteExam = async () => {
+    if (!user?.id || !pendingDeleteExam?.Id) return;
+
+    try {
+      setDeletingExam(true);
+      await deleteTeacherExam(user.id, pendingDeleteExam.Id);
+      setExamPapers((prev) => prev.filter((exam) => exam.Id !== pendingDeleteExam.Id));
+      setSummary((prev) => {
+        if (!prev) return prev;
+        const nextCount = Math.max(0, Number(prev.ExamPaperCount ?? 0) - 1);
+        return { ...prev, ExamPaperCount: nextCount };
+      });
+      showToast('Đã xóa đề thi.', 'success');
+      setShowDeleteExamModal(false);
+      setPendingDeleteExam(null);
+    } catch (err) {
+      showToast(err?.response?.data?.message || 'Không thể xóa đề thi.', 'error');
+    } finally {
+      setDeletingExam(false);
+    }
+  };
+
+  const handleCopyExam = async (item) => {
+    if (!user?.id || !item?.Id) {
+      showToast('Không tìm thấy thông tin đề thi.', 'error');
+      return;
+    }
+
+    try {
       const result = await copyTeacherExam(user.id, item.Id);
       if (result?.examPaper) {
         setExamPapers((prev) => [result.examPaper, ...prev]);
@@ -1044,15 +1061,18 @@ const TeacherDashboardScreen = ({ route, navigation }) => {
         contentContainerStyle={{ paddingTop: 0, paddingBottom: 24 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
-        <View className="mb-8">
+        <View className="mb-1">
           <Text className="mt-6 text-primary text-2xl font-bold tracking-tight mb-1">
             {activeTab === 'home'
               ? 'Tổng quan'
               : bottomNavItems.find((i) => i.key === activeTab)?.label}
           </Text>
-          <Text className="text-3xl font-semibold text-on-surface tracking-tight leading-tight" numberOfLines={2}>
-            Chào mừng trở lại,{"\n"}{displayTeacher?.fullName || 'Giáo viên'}!
-          </Text>
+          {/* Ẩn dòng chào mừng khi ở tab Đề thi */}
+          {activeTab !== 'exams' && (
+            <Text className="text-3xl font-semibold text-on-surface tracking-tight leading-tight" numberOfLines={2}>
+              Chào mừng trở lại,{"\n"}{displayTeacher?.fullName || 'Giáo viên'}!
+            </Text>
+          )}
         </View>
 
         {error ? (
@@ -1145,6 +1165,55 @@ const TeacherDashboardScreen = ({ route, navigation }) => {
                   <>
                     <MaterialIcons name="delete" size={16} color="#FFFFFF" />
                     <Text className="text-white font-bold ml-1">Xóa ca thi</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal visible={showDeleteExamModal} transparent animationType="fade" onRequestClose={onCloseDeleteExamModal}>
+        <Pressable
+          className="flex-1 items-center justify-center px-4"
+          style={{ backgroundColor: 'rgba(0, 0, 0, 0.55)' }}
+          onPress={onCloseDeleteExamModal}
+        >
+          <Pressable
+            className="w-full max-w-md rounded-3xl bg-surface-container-lowest p-5"
+            onPress={(event) => event.stopPropagation()}
+          >
+            <View className="flex-row items-center mb-3">
+              <View className="w-11 h-11 rounded-2xl bg-red-50 items-center justify-center mr-3">
+                <MaterialIcons name="delete-outline" size={22} color="#B42318" />
+              </View>
+              <Text className="text-lg font-bold text-on-surface">Xóa đề thi</Text>
+            </View>
+
+            <Text className="text-on-surface-variant leading-5 mb-5">
+              Bạn có chắc muốn xóa đề thi {pendingDeleteExam?.Title ? `"${pendingDeleteExam.Title}"` : 'này'}?
+            </Text>
+
+            <View className="flex-row items-center justify-end gap-2">
+              <TouchableOpacity
+                onPress={onCloseDeleteExamModal}
+                disabled={deletingExam}
+                className="h-11 px-4 rounded-xl bg-surface-container-high items-center justify-center"
+              >
+                <Text className="text-on-surface font-semibold">Hủy</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={onConfirmDeleteExam}
+                disabled={deletingExam}
+                className="h-11 px-4 rounded-xl bg-red-600 items-center justify-center flex-row"
+              >
+                {deletingExam ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <>
+                    <MaterialIcons name="delete" size={16} color="#FFFFFF" />
+                    <Text className="text-white font-bold ml-1">Xóa đề thi</Text>
                   </>
                 )}
               </TouchableOpacity>
@@ -1377,7 +1446,8 @@ const stylesExam = StyleSheet.create({
   metaItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   metaText: { fontSize: 13, color: EXAM_COLORS.onSurfaceVariant },
   cardFooter: { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center' },
-  actionText: { color: '#00357f', fontWeight: '800', fontSize: 14 },
+
+  actionText: { fontWeight: '800', fontSize: 14, color: EXAM_COLORS.primary },
   addActions: { gap: 12 },
   addButton: {
     borderRadius: 14,

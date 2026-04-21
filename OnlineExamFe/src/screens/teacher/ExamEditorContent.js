@@ -10,11 +10,12 @@ import {
   View,
   Platform,
   StatusBar,
+  Modal,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 
 const COLORS = {
-  primary: '#00357f',
+  primary: '#005BBF',
   primaryContainer: '#004aad',
   background: '#f7f9fb',
   surfaceContainerLow: '#f2f4f6',
@@ -138,25 +139,31 @@ const ExamEditorContent = ({ navigation, route }) => {
     [questions]
   );
 
+  const [showMissingAnswerModal, setShowMissingAnswerModal] = useState(false);
+  const [missingNumbers, setMissingNumbers] = useState('');
+
   const handleContinue = () => {
+    // Nếu đang có modal lỗi thì không cho tiếp tục
+    if (showMissingAnswerModal) return;
     if (questions.length === 0) {
-      Alert.alert('Chưa có câu hỏi', 'Vui lòng nhập ít nhất 1 câu hỏi trước khi tiếp tục.');
+      setMissingNumbers('Vui lòng nhập ít nhất 1 câu hỏi trước khi tiếp tục.');
+      setShowMissingAnswerModal(true);
       editorRef.current?.focus();
       return;
     }
 
     if (invalidQuestions.length > 0) {
-      const missingNumbers = invalidQuestions.map((q) => `Câu ${q.number}`).join(', ');
-      Alert.alert(
-        'Thiếu đáp án đúng',
-        `Vui lòng chọn đáp án đúng cho: ${missingNumbers}.`
-      );
+      const missing = invalidQuestions.map((q) => `Câu ${q.number}`).join(', ');
+      setMissingNumbers(`Vui lòng chọn đáp án đúng cho: ${missing}.`);
+      setShowMissingAnswerModal(true);
       return;
     }
 
+    // Chỉ lấy các câu hỏi hợp lệ (đủ 4 đáp án, có 1 đáp án đúng)
+    const validQuestions = questions.filter(q => q.options.length === 4 && q.options.some(opt => opt.isCorrect));
     navigation.navigate('TeacherManualExamForm', {
       user,
-      questions,
+      questions: validQuestions,
     });
   };
 
@@ -231,6 +238,28 @@ const ExamEditorContent = ({ navigation, route }) => {
           <MaterialIcons name="arrow-forward" size={16} color="#ffffff" />
         </TouchableOpacity>
       </View>
+
+      {/* Modal xác nhận thiếu đáp án đúng */}
+      <Modal
+        visible={showMissingAnswerModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowMissingAnswerModal(false)}
+      >
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'center', alignItems: 'center' }}>
+          <View style={{ backgroundColor: '#fff', borderRadius: 16, padding: 24, minWidth: 280, alignItems: 'center' }}>
+            <MaterialIcons name="error-outline" size={36} color={COLORS.primary} style={{ marginBottom: 12 }} />
+            <Text style={{ fontWeight: 'bold', fontSize: 16, marginBottom: 8 }}>Thiếu đáp án đúng</Text>
+            <Text style={{ color: COLORS.onSurfaceVariant, textAlign: 'center', marginBottom: 20 }}>{missingNumbers}</Text>
+            <TouchableOpacity
+              style={{ backgroundColor: COLORS.primary, borderRadius: 8, paddingVertical: 10, paddingHorizontal: 32, marginTop: 8 }}
+              onPress={() => setShowMissingAnswerModal(false)}
+            >
+              <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>Đã hiểu</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 };

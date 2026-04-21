@@ -15,7 +15,7 @@ import { useToast } from '../../context/ToastContext';
 import { createTeacherExam } from '../../services/authService';
 
 const COLORS = {
-  primary: '#00357f',
+  primary: '#005BBF',
   primaryContainer: '#004aad',
   background: '#f7f9fb',
   surfaceContainerLow: '#f2f4f6',

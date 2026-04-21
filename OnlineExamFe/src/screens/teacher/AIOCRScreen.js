@@ -21,7 +21,7 @@ import { useToast } from '../../context/ToastContext';
 
 // --- DESIGN SYSTEM TOKENS ---
 const COLORS = {
-  primary: '#00357f',
+  primary: '#005BBF',
   primaryContainer: '#004aad',
   surface: '#f7f9fb', // Base Layer
   surfaceContainerLow: '#f2f4f6', // Secondary Layer
