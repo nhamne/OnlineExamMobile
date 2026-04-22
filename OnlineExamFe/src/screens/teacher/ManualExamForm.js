@@ -13,6 +13,7 @@ import {
 import { MaterialIcons } from '@expo/vector-icons';
 import { useToast } from '../../context/ToastContext';
 import { createTeacherExam } from '../../services/authService';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const COLORS = {
   primary: '#005BBF',
@@ -27,6 +28,7 @@ const COLORS = {
 
 const ManualExamForm = ({ navigation, route }) => {
   const { showToast } = useToast();
+  const insets = useSafeAreaInsets();
   const user = route?.params?.user || null;
   const questions = Array.isArray(route?.params?.questions) ? route.params.questions : [];
   const [title, setTitle] = useState('');
@@ -121,7 +123,10 @@ const ManualExamForm = ({ navigation, route }) => {
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: 24 + insets.bottom }]}
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.headerRow}>
           <TouchableOpacity
             style={styles.backButton}

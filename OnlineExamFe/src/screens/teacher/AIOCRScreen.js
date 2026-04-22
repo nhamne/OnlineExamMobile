@@ -18,6 +18,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import { API_BASE_URL } from '../../config/api';
 import { useToast } from '../../context/ToastContext';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // --- DESIGN SYSTEM TOKENS ---
 const COLORS = {
@@ -91,8 +92,10 @@ const QuestionItem = ({
   </View>
 );
 
-export default function AIOCRScreen({ navigation }) {
+export default function AIOCRScreen({ navigation, route }) {
   const { showToast } = useToast();
+  const insets = useSafeAreaInsets();
+  const user = route?.params?.user || null;
   const [selectedFile, setSelectedFile] = useState(null);
   const [extractedQuestions, setExtractedQuestions] = useState([]);
   const [editableQuestions, setEditableQuestions] = useState([]);
@@ -239,6 +242,11 @@ export default function AIOCRScreen({ navigation }) {
   };
 
   const handleContinue = () => {
+    if (!user?.id) {
+      showToast('Không tìm thấy thông tin giáo viên. Vui lòng đăng nhập lại.', 'error');
+      return;
+    }
+
     if (displayQuestions.length === 0) {
       Alert.alert('Chưa có câu hỏi', 'Vui lòng phân tích hoặc nhập câu hỏi trước khi tiếp tục.');
       return;
@@ -265,6 +273,7 @@ export default function AIOCRScreen({ navigation }) {
     }));
 
     navigation.navigate('TeacherManualExamForm', {
+      user,
       questions: formattedQuestions,
     });
   };
@@ -280,7 +289,10 @@ export default function AIOCRScreen({ navigation }) {
         <Text style={styles.headerTitle}>Tạo đề thi bằng AI OCR</Text>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollBody} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={[styles.scrollBody, { paddingBottom: 116 + insets.bottom }]}
+        showsVerticalScrollIndicator={false}
+      >
         {/* 2. File Upload Area */}
         <TouchableOpacity
           style={styles.uploadArea}
@@ -349,7 +361,7 @@ export default function AIOCRScreen({ navigation }) {
       </ScrollView>
 
       {/* 4. Bottom Action Bar */}
-      <View style={styles.footer}>
+      <View style={[styles.footer, { paddingBottom: Math.max(16, insets.bottom + 10) }]}>
         <TouchableOpacity style={styles.nextButton} onPress={handleContinue}>
           <Text style={styles.nextButtonText}>Tiếp tục</Text>
           <ArrowRight size={18} color="#fff" />

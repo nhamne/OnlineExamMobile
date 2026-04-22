@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { AppState, Alert } from 'react-native';
+import { AppState, Alert, Platform } from 'react-native';
 import { useDispatch, useSelector } from 'react-redux';
 import { incrementViolation } from '../store/useExamStore';
 import examApi from '../api/exam.api';
@@ -10,6 +10,10 @@ export const useAntiCheat = (attemptId, onAutoSubmit) => {
   const { violationCount, maxViolations } = useSelector(state => state.exam);
 
   useEffect(() => {
+    if (!attemptId || Platform.OS === 'web') {
+      return undefined;
+    }
+
     const subscription = AppState.addEventListener('change', async (nextAppState) => {
       if (
         appState.current.match(/active/) &&
@@ -36,7 +40,7 @@ export const useAntiCheat = (attemptId, onAutoSubmit) => {
     return () => {
       subscription.remove();
     };
-  }, [violationCount, maxViolations, attemptId]);
+  }, [violationCount, maxViolations, attemptId, dispatch]);
 
   useEffect(() => {
     if (violationCount >= maxViolations) {

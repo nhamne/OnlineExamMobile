@@ -4,7 +4,9 @@ import {
   Text,
   SafeAreaView,
   ActivityIndicator,
-  FlatList,
+  ScrollView,
+  TouchableOpacity,
+  Platform,
 } from 'react-native';
 import examApi from '../api/exam.api';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -12,6 +14,7 @@ import { COLORS } from '../constants/theme';
 
 const ExamDetailScreen = ({ route, navigation }) => {
   const { attemptId } = route.params;
+  const submittedScore = route?.params?.submittedScore;
   const [loading, setLoading] = useState(true);
   const [detail, setDetail] = useState(null);
 
@@ -31,9 +34,19 @@ const ExamDetailScreen = ({ route, navigation }) => {
 
   if (loading) {
     return (
-      <View className="flex-1 justify-center items-center bg-surface">
-        <ActivityIndicator size="large" color={COLORS.primary} />
-      </View>
+      <SafeAreaView className="flex-1 bg-surface-container-low">
+        <View className="bg-primary px-6 pt-10 pb-8 rounded-b-[40px] shadow-lg">
+          <Text className="text-white text-3xl font-black tracking-tight mb-2">Kết quả chi tiết</Text>
+          {submittedScore !== undefined ? (
+            <View className="bg-white/20 px-3 py-1 rounded-full self-start mt-2">
+              <Text className="text-white font-bold text-sm">Điểm: {Number(submittedScore).toFixed(2)}</Text>
+            </View>
+          ) : null}
+        </View>
+        <View className="flex-1 justify-center items-center bg-surface">
+          <ActivityIndicator size="large" color={COLORS.primary} />
+        </View>
+      </SafeAreaView>
     );
   }
 
@@ -45,7 +58,7 @@ const ExamDetailScreen = ({ route, navigation }) => {
     );
   }
 
-  const renderQuestion = ({ item, index }) => {
+  const renderQuestion = (item, index) => {
     const isCorrect = item.selectedOption === item.correctOption;
     
     return (
@@ -106,8 +119,17 @@ const ExamDetailScreen = ({ route, navigation }) => {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-surface-container-low">
+    <SafeAreaView
+      className="flex-1 bg-surface-container-low"
+      style={Platform.OS === 'web' ? { height: '100vh', overflow: 'hidden' } : {}}
+    >
       <View className="bg-primary px-6 pt-10 pb-8 rounded-b-[40px] shadow-lg">
+        <TouchableOpacity
+          className="w-9 h-9 rounded-full bg-white/20 items-center justify-center mb-4"
+          onPress={() => navigation.goBack()}
+        >
+          <MaterialIcons name="arrow-back" size={20} color="#FFFFFF" />
+        </TouchableOpacity>
         <Text className="text-white text-3xl font-black tracking-tight mb-2">Kết quả chi tiết</Text>
         <View className="flex-row gap-4 mt-2">
           <View className="bg-white/20 px-3 py-1 rounded-full">
@@ -118,14 +140,21 @@ const ExamDetailScreen = ({ route, navigation }) => {
           </View>
         </View>
       </View>
-      
-      <FlatList
-        data={detail.questions}
-        renderItem={renderQuestion}
-        keyExtractor={item => item.id.toString()}
-        contentContainerStyle={{ padding: 16, paddingBottom: 40 }}
-        showsVerticalScrollIndicator={false}
-      />
+
+      <View style={{ flex: 1, minHeight: 0 }}>
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ padding: 16, paddingBottom: 72 }}
+          showsVerticalScrollIndicator={false}
+          nestedScrollEnabled
+        >
+          {Array.isArray(detail?.questions)
+            ? detail.questions.map((item, index) => (
+                <View key={String(item.id || index)}>{renderQuestion(item, index)}</View>
+              ))
+            : null}
+        </ScrollView>
+      </View>
     </SafeAreaView>
   );
 };

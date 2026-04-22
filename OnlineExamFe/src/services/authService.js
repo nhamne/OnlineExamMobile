@@ -206,3 +206,8 @@ export async function startExamAttempt(userId, sessionId) {
   const response = await api.post(`/api/exam/attempt/start/${sessionId}`, { studentId: userId });
   return response.data;
 }
+
+export async function getStudentResultHistory(userId) {
+  const response = await api.get(`/api/exam/student/results/${userId}`);
+  return response.data;
+}

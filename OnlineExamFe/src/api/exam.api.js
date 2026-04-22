@@ -38,6 +38,7 @@ const examApi = {
     api.post('/api/exam/attempt/violation', { attemptId, type, timestamp: new Date().toISOString() }),
     
   getStatistics: (userId) => api.get(`/api/exam/student/stats/${userId}`),
+  getStudentResults: (userId) => api.get(`/api/exam/student/results/${userId}`),
   
   getResultDetail: (attemptId) => api.get(`/api/exam/results/${attemptId}/detail`),
   

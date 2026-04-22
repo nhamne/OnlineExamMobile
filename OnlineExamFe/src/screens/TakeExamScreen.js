@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -8,7 +8,9 @@ import {
   ScrollView,
   Alert,
   ActivityIndicator,
-  BackHandler,
+  Platform,
+  Modal,
+  Pressable,
 } from 'react-native';
 import { useDispatch, useSelector } from 'react-redux';
 import { useExamTimer } from '../hooks/useExamTimer';
@@ -25,10 +27,13 @@ const TakeExamScreen = ({ navigation, route }) => {
   
   const [currentIndex, setCurrentIndex] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [showSubmitConfirmModal, setShowSubmitConfirmModal] = useState(false);
+  const allowExitRef = useRef(false);
 
   // Prevention of accidental exit and force 0 score on exit
   useEffect(() => {
     const unsubscribe = navigation.addListener('beforeRemove', (e) => {
+      if (allowExitRef.current) return;
       if (isSubmitting) return;
 
       // Prevent default behavior
@@ -45,11 +50,13 @@ const TakeExamScreen = ({ navigation, route }) => {
             onPress: async () => {
               try {
                 setLoading(true);
+                allowExitRef.current = true;
                 await examApi.forceSubmit(currentAttempt.id);
                 dispatch(clearExam());
                 // After clearing, we can allow the navigation
                 navigation.dispatch(e.data.action);
               } catch (error) {
+                allowExitRef.current = false;
                 Alert.alert('Lỗi', 'Không thể kết thúc bài thi. Vui lòng thử lại.');
               } finally {
                 setLoading(false);
@@ -69,15 +76,12 @@ const TakeExamScreen = ({ navigation, route }) => {
     dispatch(setIsSubmitting(true));
     try {
       const response = await examApi.submitExam(currentAttempt.id);
-      Alert.alert('Nộp bài thành công', `Điểm của bạn: ${response.data.score}`, [
-        {
-          text: 'Xem kết quả',
-          onPress: () => {
-            dispatch(clearExam());
-            navigation.replace('StudentExamDetail', { attemptId: response.data.attemptId });
-          },
-        },
-      ]);
+      allowExitRef.current = true;
+      dispatch(clearExam());
+      navigation.replace('StudentExamDetail', {
+        attemptId: response.data.attemptId,
+        submittedScore: response.data.score,
+      });
     } catch (error) {
       console.error('Final submit error:', error.response?.data || error.message);
       Alert.alert('Lỗi', 'Không thể nộp bài. Vui lòng kiểm tra kết nối mạng và thử lại.');
@@ -88,6 +92,18 @@ const TakeExamScreen = ({ navigation, route }) => {
 
   const { formatTime, timeLeft } = useExamTimer(handleFinalSubmit);
   useAntiCheat(currentAttempt?.id, handleFinalSubmit);
+
+  const openSubmitConfirmation = useCallback(() => {
+    if (Platform.OS === 'web') {
+      setShowSubmitConfirmModal(true);
+      return;
+    }
+
+    Alert.alert('Xác nhận nộp bài', 'Bạn có chắc chắn muốn nộp bài ngay bây giờ?', [
+      { text: 'Hủy', style: 'cancel' },
+      { text: 'Nộp bài', onPress: handleFinalSubmit },
+    ]);
+  }, [handleFinalSubmit]);
 
   const handleSelectOption = async (questionId, optionId) => {
     dispatch(updateAnswer({ questionId, optionId }));
@@ -111,6 +127,37 @@ const TakeExamScreen = ({ navigation, route }) => {
 
   return (
     <SafeAreaView style={styles.container}>
+      <Modal
+        transparent
+        animationType="fade"
+        visible={showSubmitConfirmModal}
+        onRequestClose={() => setShowSubmitConfirmModal(false)}
+      >
+        <Pressable style={styles.modalBackdrop} onPress={() => setShowSubmitConfirmModal(false)}>
+          <Pressable style={styles.modalCard} onPress={() => {}}>
+            <Text style={styles.modalTitle}>Xác nhận nộp bài</Text>
+            <Text style={styles.modalMessage}>Bạn có chắc chắn muốn nộp bài ngay bây giờ?</Text>
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={[styles.modalBtn, styles.modalBtnSecondary]}
+                onPress={() => setShowSubmitConfirmModal(false)}
+              >
+                <Text style={styles.modalBtnSecondaryText}>Hủy</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalBtn, styles.modalBtnPrimary]}
+                onPress={() => {
+                  setShowSubmitConfirmModal(false);
+                  handleFinalSubmit();
+                }}
+              >
+                <Text style={styles.modalBtnPrimaryText}>Nộp bài</Text>
+              </TouchableOpacity>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
       {/* Header */}
       <View style={styles.header}>
         <View>
@@ -119,12 +166,7 @@ const TakeExamScreen = ({ navigation, route }) => {
             {formatTime(timeLeft)}
           </Text>
         </View>
-        <TouchableOpacity style={styles.submitBtn} onPress={() => {
-          Alert.alert('Xác nhận nộp bài', 'Bạn có chắc chắn muốn nộp bài ngay bây giờ?', [
-            { text: 'Hủy', style: 'cancel' },
-            { text: 'Nộp bài', onPress: handleFinalSubmit },
-          ]);
-        }}>
+        <TouchableOpacity style={styles.submitBtn} onPress={openSubmitConfirmation}>
           <Text style={styles.submitBtnText}>Nộp bài</Text>
         </TouchableOpacity>
       </View>
@@ -281,6 +323,61 @@ const styles = StyleSheet.create({
   navBtnDisabled: { opacity: 0.5 },
   navBtnText: { fontSize: 16, color: '#4A90E2', fontWeight: '500', marginHorizontal: 4 },
   navBtnTextDisabled: { color: '#CCC' },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 16,
+  },
+  modalCard: {
+    width: '100%',
+    maxWidth: 420,
+    backgroundColor: '#FFF',
+    borderRadius: 16,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+  modalMessage: {
+    marginTop: 8,
+    fontSize: 15,
+    color: '#334155',
+    lineHeight: 22,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 10,
+    marginTop: 18,
+  },
+  modalBtn: {
+    minWidth: 96,
+    height: 40,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 14,
+  },
+  modalBtnSecondary: {
+    backgroundColor: '#F1F5F9',
+  },
+  modalBtnPrimary: {
+    backgroundColor: '#2563EB',
+  },
+  modalBtnSecondaryText: {
+    color: '#334155',
+    fontWeight: '700',
+  },
+  modalBtnPrimaryText: {
+    color: '#FFF',
+    fontWeight: '800',
+  },
 });
 
 export default TakeExamScreen;

@@ -16,12 +16,22 @@ const examSlice = createSlice({
       const { attempt, questions, duration } = action.payload;
       state.currentAttempt = attempt;
       state.snapshotQuestions = questions;
+
+      const resolvedDuration = Number(
+        duration
+        ?? attempt?.examDurationInMinutes
+        ?? attempt?.duration
+        ?? 0
+      );
+      const safeDuration = Number.isFinite(resolvedDuration) && resolvedDuration > 0
+        ? resolvedDuration
+        : 0;
       
       // Calculate remaining time
       const startTime = new Date(attempt.startedAt).getTime();
       const now = new Date().getTime();
-      const elapsedSeconds = Math.floor((now - startTime) / 1000);
-      const totalSeconds = duration * 60;
+      const elapsedSeconds = Math.max(0, Math.floor((now - startTime) / 1000));
+      const totalSeconds = safeDuration * 60;
       state.timeLeft = Math.max(0, totalSeconds - elapsedSeconds);
       
       state.answers = {};

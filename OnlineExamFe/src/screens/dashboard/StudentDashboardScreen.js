@@ -11,11 +11,13 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 import { 
   getStudentDashboard, 
   getStudentClassrooms, 
   joinClassroom,
-  startExamAttempt 
+  startExamAttempt,
+  getStudentResultHistory,
 } from '../../services/authService';
 import BottomSidebarNav from '../../components/BottomSidebarNav';
 import DashboardTopBar from '../../components/DashboardTopBar';
@@ -31,6 +33,66 @@ const studentMenuItems = [
   { key: 'sessions', label: 'Ca thi', shortLabel: 'Ca thi', icon: 'assignment' },
   { key: 'results', label: 'Kết quả', shortLabel: 'Kết quả', icon: 'person-outline' },
 ];
+
+const getSessionState = (item) => {
+  const submissionStatus = Number(item?.SubmissionStatus);
+  const now = Date.now();
+  const startTime = item?.StartTime ? new Date(item.StartTime).getTime() : NaN;
+  const endTime = item?.EndTime ? new Date(item.EndTime).getTime() : NaN;
+
+  if (submissionStatus === 1) {
+    return {
+      key: 'submitted',
+      label: 'Đã nộp',
+      canEnter: false,
+      action: 'result',
+      badgeStyle: { backgroundColor: '#dcfce7' },
+      textStyle: { color: '#15803d' },
+    };
+  }
+
+  if (submissionStatus === 2) {
+    return {
+      key: 'forced',
+      label: 'Đã kết thúc',
+      canEnter: false,
+      action: 'result',
+      badgeStyle: { backgroundColor: '#fee2e2' },
+      textStyle: { color: '#b91c1c' },
+    };
+  }
+
+  if (Number.isFinite(endTime) && now > endTime) {
+    return {
+      key: 'ended',
+      label: 'Đã kết thúc',
+      canEnter: false,
+      action: 'none',
+      badgeStyle: { backgroundColor: '#f1f5f9' },
+      textStyle: { color: '#475569' },
+    };
+  }
+
+  if (Number.isFinite(startTime) && now < startTime) {
+    return {
+      key: 'upcoming',
+      label: 'Chưa bắt đầu',
+      canEnter: false,
+      action: 'none',
+      badgeStyle: { backgroundColor: '#fef3c7' },
+      textStyle: { color: '#b45309' },
+    };
+  }
+
+  return {
+    key: 'active',
+    label: 'Vào thi',
+    canEnter: true,
+    action: 'enter',
+    badgeStyle: { backgroundColor: '#dbeafe' },
+    textStyle: { color: COLORS.primary },
+  };
+};
 
 const StatCard = ({ icon, label, value, tone = 'default', onPress }) => {
   const isHighlight = tone === 'highlight';
@@ -54,15 +116,21 @@ const StatCard = ({ icon, label, value, tone = 'default', onPress }) => {
   );
 };
 
-const SessionCard = ({ item, onPress }) => (
+const SessionCard = ({ item, onPress }) => {
+  const state = getSessionState(item);
+  const canPress = state.action !== 'none';
+
+  return (
   <TouchableOpacity 
     onPress={() => onPress && onPress(item)}
+    disabled={!canPress}
     className="bg-surface-container-lowest rounded-2xl p-4 mb-3 border border-slate-100 shadow-sm"
+    style={{ opacity: canPress ? 1 : 0.85 }}
   >
     <View className="flex-row items-center justify-between">
       <Text className="font-extrabold text-on-surface flex-1 pr-3" numberOfLines={1}>{item.SessionName}</Text>
-      <View className="bg-blue-50 px-2 py-1 rounded-lg">
-        <Text className="text-xs font-bold text-primary">Vào thi</Text>
+      <View className="px-2 py-1 rounded-lg" style={state.badgeStyle}>
+        <Text className="text-xs font-bold" style={state.textStyle}>{state.label}</Text>
       </View>
     </View>
     <View className="flex-row items-center mt-2">
@@ -74,7 +142,8 @@ const SessionCard = ({ item, onPress }) => (
       <Text className="text-sm text-on-surface-variant ml-1">Bài thi: {item.ExamTitle}</Text>
     </View>
   </TouchableOpacity>
-);
+  );
+};
 
 const StudentDashboardScreen = ({ route, navigation }) => {
   const user = route.params?.user;
@@ -126,6 +195,13 @@ const StudentDashboardScreen = ({ route, navigation }) => {
     })();
   }, [loadData]);
 
+  useFocusEffect(
+    useCallback(() => {
+      loadData();
+      return () => {};
+    }, [loadData])
+  );
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await loadData();
@@ -152,13 +228,57 @@ const StudentDashboardScreen = ({ route, navigation }) => {
   };
 
   const handleEnterSession = async (session) => {
+    const sessionState = getSessionState(session);
+    if (sessionState.action === 'result') {
+      const directAttemptId = Number(session?.AttemptId);
+      if (Number.isInteger(directAttemptId) && directAttemptId > 0) {
+        navigation.navigate('StudentExamDetail', { attemptId: directAttemptId });
+        return;
+      }
+
+      try {
+        const history = await getStudentResultHistory(user?.id);
+        const matched = Array.isArray(history)
+          ? history.find((item) => Number(item?.SessionId) === Number(session?.Id))
+          : null;
+        const fallbackAttemptId = Number(matched?.AttemptId);
+
+        if (Number.isInteger(fallbackAttemptId) && fallbackAttemptId > 0) {
+          navigation.navigate('StudentExamDetail', { attemptId: fallbackAttemptId });
+          return;
+        }
+
+        showToast('Không tìm thấy dữ liệu kết quả của bài thi này.', 'warning');
+      } catch (error) {
+        showToast('Không tải được dữ liệu kết quả. Vui lòng thử lại.', 'error');
+      }
+      return;
+    }
+
+    if (sessionState.action === 'none') {
+      if (sessionState.key === 'submitted') {
+        showToast('Bạn đã nộp bài thi cho ca này.', 'info');
+      } else if (sessionState.key === 'upcoming') {
+        showToast('Ca thi chưa bắt đầu.', 'info');
+      } else {
+        showToast('Ca thi đã kết thúc.', 'info');
+      }
+      return;
+    }
+
     try {
       showToast('Đang chuẩn bị bài thi...', 'info');
       const data = await startExamAttempt(user?.id, session.Id);
+      const examDuration = Number(
+        data?.attempt?.examDurationInMinutes
+        ?? data?.attempt?.duration
+        ?? session?.ExamPaperDurationInMinutes
+        ?? 0
+      );
       dispatch(setAttempt({
         attempt: data.attempt,
         questions: data.questions,
-        duration: data.attempt.duration
+        duration: examDuration
       }));
       navigation.navigate('TakeExam');
     } catch (err) {
@@ -231,9 +351,9 @@ const StudentDashboardScreen = ({ route, navigation }) => {
         <Text className="text-on-surface-variant mb-4 text-sm">
           Nhập mã lớp do giáo viên cung cấp để bắt đầu.
         </Text>
-        <View className="flex-row gap-2">
+        <View className="flex-col gap-2">
           <TextInput
-            className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 h-12 text-on-surface font-medium"
+            className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 h-14 text-on-surface font-medium"
             placeholder="Mã lớp (VD: WEB101)"
             value={joinCode}
             onChangeText={setJoinCode}
@@ -311,13 +431,14 @@ const StudentDashboardScreen = ({ route, navigation }) => {
               ? 'Tiến độ học tập rất tốt, hãy tiếp tục duy trì phong độ này!'
               : 'Hãy cố gắng hoàn thành thêm các bài thi để cải thiện kết quả học tập.'}
           </Text>
-          <TouchableOpacity 
+          <TouchableOpacity
             className="mt-4 flex-row items-center"
-            onPress={() => navigation.navigate('StudentStatistics', { userId: user?.id })}
+            onPress={() => navigation.navigate('StudentResults', { userId: user?.id })}
           >
-            <Text className="text-primary font-bold mr-1">Xem thống kê chi tiết</Text>
+            <Text className="text-primary font-bold mr-1">Xem lịch sử kết quả thi</Text>
             <MaterialIcons name="chevron-right" size={20} color={COLORS.primary} />
           </TouchableOpacity>
+          
         </View>
       </>
     );

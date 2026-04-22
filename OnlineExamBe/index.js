@@ -5,7 +5,7 @@ const path = require('path');
 const bcrypt = require('bcryptjs');
 const sql = require('mssql');
 const multer = require('multer');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } = require('@google/generative-ai');
 const PDFDocument = require('pdfkit');
 require('dotenv').config();
 
@@ -264,7 +264,7 @@ function normalizeOcrQuestions(rawQuestions) {
 app.post('/api/ai-ocr/parse', upload.single('file'), async (req, res) => {
   try {
     const apiKey = process.env.GEMINI_API_KEY;
-    const modelName = process.env.GEMINI_MODEL || 'models/gemini-2.0-flash';
+    const modelName = String(process.env.GEMINI_MODEL || 'gemini-1.5-flash').trim();
 
     if (!apiKey) {
       return res.status(500).json({ message: 'Missing GEMINI_API_KEY in env.' });
@@ -296,15 +296,22 @@ app.post('/api/ai-ocr/parse', upload.single('file'), async (req, res) => {
       '(4) Khong chen text ngoai JSON. (5) Tu sua loi OCR pho bien: "Cau"->"Câu", "O"->"0" khi la so, "I"->"1". ' +
       '(6) Neu thieu dap an, van tao mang options du so luong tim duoc.';
 
-    const modelCandidates = Array.from(
-      new Set([
-        modelName,
-        'models/gemini-2.0-flash',
-        'models/gemini-2.0-flash-001',
-        'models/gemini-2.5-flash',
-        'models/gemini-flash-latest',
-      ].filter(Boolean))
-    );
+    const baseCandidates = [
+      modelName,
+      'gemini-2.5-flash-lite',
+      'gemini-flash-lite-latest',
+      'gemini-2.5-flash',
+      'gemini-flash-latest',
+    ].filter(Boolean);
+
+    const modelCandidates = Array.from(new Set(baseCandidates));
+
+    const safetySettings = [
+      { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+      { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
+      { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
+      { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+    ];
 
     let rawText = '';
     let lastError = null;
@@ -317,9 +324,11 @@ app.post('/api/ai-ocr/parse', upload.single('file'), async (req, res) => {
             temperature: 0.2,
             responseMimeType: 'application/json',
           },
+          safetySettings,
         });
 
-        const result = await model.generateContent([
+        // Add timeout mechanism so a single model doesn't block forever
+        const contentPromise = model.generateContent([
           {
             inlineData: {
               data: req.file.buffer.toString('base64'),
@@ -329,22 +338,39 @@ app.post('/api/ai-ocr/parse', upload.single('file'), async (req, res) => {
           { text: prompt },
         ]);
 
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('Generation timeout (45s)')), 45000);
+        });
+
+        const result = await Promise.race([contentPromise, timeoutPromise]);
+
         rawText = result?.response?.text?.() || '';
         if (rawText) break;
       } catch (error) {
         lastError = error;
+        // Break early ONLY for unauthorized key errors.
+        // Other errors (404, 503, 429, 400) should allow fallback models to try.
+        const msg = error?.message || '';
+        if (msg.includes('401') || msg.includes('403')) {
+          break;
+        }
       }
     }
 
     if (!rawText) {
+      let em = lastError?.message || 'Unknown error';
+      if (em.includes('[') && em.includes(']')) em = em.substring(em.indexOf('] ') + 2);
+      if (em.length > 100) em = em.substring(0, 100) + '...';
       return res.status(500).json({
-        message: `Gemini model unavailable. Tried: ${modelCandidates.join(', ')}`,
-        detail: lastError?.message,
+        message: `OCR tạch toàn bộ model. Lỗi cuối: ${em}`,
+        detail: lastError?.message || 'Empty response',
       });
     }
+    
     let parsed;
     try {
-      parsed = JSON.parse(rawText);
+      let cleanText = rawText.replace(/^```json\s*/i, '').replace(/\s*```$/i, '').trim();
+      parsed = JSON.parse(cleanText);
     } catch (parseError) {
       return res.status(500).json({ message: 'Gemini response is not valid JSON.', rawText });
     }
@@ -718,8 +744,8 @@ app.post('/api/dashboard/teacher/:userId/exams', async (req, res) => {
       return res.status(400).json({ message: 'Thời gian thi không hợp lệ.' });
     }
 
-    if (questionsRaw.length < 10) {
-      return res.status(400).json({ message: 'Vui lòng nhập ít nhất 10 câu hỏi.' });
+    if (questionsRaw.length === 0) {
+      return res.status(400).json({ message: 'Vui lòng nhập ít nhất 1 câu hỏi.' });
     }
 
     const isDraft = status === 'draft';
@@ -2269,11 +2295,22 @@ app.get('/api/dashboard/student/:userId', async (req, res) => {
           es.EndTime,
           es.DurationInMinutes,
           c.ClassName,
-          ep.Title AS ExamTitle
+          ep.Title AS ExamTitle,
+          latestSubmission.AttemptId,
+          latestSubmission.Status AS SubmissionStatus,
+          latestSubmission.SubmittedAt,
+          latestSubmission.StartedAt AS AttemptStartedAt
         FROM ExamSessions es
         INNER JOIN ClassroomMembers cm ON cm.ClassroomId = es.ClassroomId
         INNER JOIN Classrooms c ON c.Id = es.ClassroomId
         INNER JOIN ExamPapers ep ON ep.Id = es.ExamPaperId
+        OUTER APPLY (
+          SELECT TOP 1 s.Id AS AttemptId, s.Status, s.SubmittedAt, s.StartedAt
+          FROM Submissions s
+          WHERE s.ExamSessionId = es.Id
+            AND s.StudentId = @studentId
+          ORDER BY ISNULL(s.SubmittedAt, s.StartedAt) DESC, s.Id DESC
+        ) AS latestSubmission
         WHERE cm.StudentId = @studentId
           AND c.IsDeleted = 0
           AND ep.IsDeleted = 0
@@ -2367,9 +2404,15 @@ app.post('/api/exam/attempt/start/:sessionId', async (req, res) => {
     
     if (sessionResult.recordset.length === 0) return res.status(404).json({ message: 'Không tìm thấy ca thi.' });
     const session = sessionResult.recordset[0];
+    const examDurationInMinutes = Number(session.ExamDuration ?? 0);
+    const sessionDurationInMinutes = Number(session.DurationInMinutes ?? 0);
     const now = new Date();
     if (now < new Date(session.StartTime)) return res.status(403).json({ message: 'Ca thi chưa bắt đầu.' });
     if (now > new Date(session.EndTime)) return res.status(403).json({ message: 'Ca thi đã kết thúc.' });
+
+    if (!Number.isFinite(examDurationInMinutes) || examDurationInMinutes <= 0) {
+      return res.status(500).json({ message: 'Thời lượng đề thi không hợp lệ.' });
+    }
 
     let submissionResult = await pool.request()
       .input('sessionId', sql.Int, sessionId)
@@ -2411,7 +2454,9 @@ app.post('/api/exam/attempt/start/:sessionId', async (req, res) => {
         sessionId: submission.ExamSessionId,
         studentId: submission.StudentId,
         startedAt: submission.StartedAt,
-        duration: session.ExamDuration
+        duration: examDurationInMinutes,
+        examDurationInMinutes,
+        sessionDurationInMinutes
       },
       questions: questions
     });
@@ -2690,6 +2735,48 @@ app.get('/api/exam/student/stats/:userId', async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
+  }
+});
+
+// Get Student Result History
+app.get('/api/exam/student/results/:userId', async (req, res) => {
+  try {
+    const userId = Number(req.params.userId);
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({ message: 'Invalid userId.' });
+    }
+
+    const pool = await getPool();
+    const result = await pool
+      .request()
+      .input('studentId', sql.Int, userId)
+      .query(`
+        SELECT
+          s.Id AS AttemptId,
+          s.Status,
+          s.Score,
+          s.CorrectAnswersCount,
+          s.SubmittedAt,
+          s.StartedAt,
+          es.Id AS SessionId,
+          es.SessionName,
+          c.ClassName,
+          ep.Title AS ExamTitle,
+          (SELECT COUNT(*) FROM Questions q WHERE q.ExamPaperId = es.ExamPaperId) AS TotalQuestions
+        FROM Submissions s
+        INNER JOIN ExamSessions es ON es.Id = s.ExamSessionId
+        INNER JOIN Classrooms c ON c.Id = es.ClassroomId
+        INNER JOIN ExamPapers ep ON ep.Id = es.ExamPaperId
+        WHERE s.StudentId = @studentId
+          AND s.Status IN (1, 2)
+          AND c.IsDeleted = 0
+          AND ep.IsDeleted = 0
+        ORDER BY ISNULL(s.SubmittedAt, s.StartedAt) DESC, s.Id DESC
+      `);
+
+    return res.json(result.recordset);
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
   }
 });
 
