@@ -74,6 +74,15 @@ export async function enableBiometricLogin(user) {
   return true;
 }
 
+export async function disableBiometricLogin(role) {
+  if (!canUseBiometric) return false;
+
+  const resolvedRole = normalizeRole(role);
+  await SecureStore.deleteItemAsync(getBiometricUserKey(resolvedRole));
+  await SecureStore.deleteItemAsync(getBiometricEnabledKey(resolvedRole));
+  return true;
+}
+
 export async function authenticateBiometricLogin(role) {
   const info = await getBiometricInfo(role);
   if (!info.available || !info.enabled || !info.user) {
