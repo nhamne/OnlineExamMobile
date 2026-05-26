@@ -4,7 +4,8 @@ const fs = require('fs/promises');
 const path = require('path');
 const bcrypt = require('bcryptjs');
 const sql = require('mssql');
-require('dotenv').config();
+require('dotenv').config({ override: true });
+const multer = require('multer');
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
@@ -976,6 +977,101 @@ app.post('/api/auth/login', async (req, res) => {
     });
   } catch (error) {
     return res.status(500).json({ message: error.message });
+  }
+});
+
+const nodemailer = require('nodemailer');
+const otpCache = new Map();
+
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+});
+
+app.post('/api/auth/forgot-password/send-otp', async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ message: 'Email is required.' });
+    }
+
+    const pool = await getPool();
+    const existing = await pool
+      .request()
+      .input('email', sql.VarChar(255), String(email).trim().toLowerCase())
+      .query('SELECT TOP 1 Id FROM Users WHERE Email = @email');
+
+    if (existing.recordset.length === 0) {
+      return res.status(404).json({ message: 'Email không tồn tại trong hệ thống.' });
+    }
+
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    otpCache.set(email.toLowerCase(), {
+      otp,
+      expiresAt: Date.now() + 5 * 60 * 1000, // 5 phút
+    });
+
+    const mailOptions = {
+      from: process.env.EMAIL_USER,
+      to: email,
+      subject: 'Mã xác nhận quên mật khẩu',
+      text: `Mã xác nhận (OTP) của bạn là: ${otp}\n\nMã này sẽ hết hạn trong 5 phút.`,
+    };
+
+    await transporter.sendMail(mailOptions);
+
+    return res.json({ message: 'OTP sent successfully.' });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'Failed to send OTP.' });
+  }
+});
+
+app.post('/api/auth/reset-password', async (req, res) => {
+  try {
+    const { email, otp, newPassword } = req.body;
+
+    if (!email || !otp || !newPassword) {
+      return res.status(400).json({ message: 'Missing required fields.' });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({ message: 'Mật khẩu mới phải có ít nhất 6 ký tự.' });
+    }
+
+    const cached = otpCache.get(email.toLowerCase());
+    if (!cached) {
+      return res.status(400).json({ message: 'Mã OTP không hợp lệ hoặc bạn chưa yêu cầu gửi mã.' });
+    }
+
+    if (Date.now() > cached.expiresAt) {
+      otpCache.delete(email.toLowerCase());
+      return res.status(400).json({ message: 'Mã OTP đã hết hạn.' });
+    }
+
+    if (cached.otp !== otp) {
+      return res.status(400).json({ message: 'Mã OTP không chính xác.' });
+    }
+
+    // Xóa OTP sau khi dùng
+    otpCache.delete(email.toLowerCase());
+
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+    const pool = await getPool();
+
+    await pool
+      .request()
+      .input('email', sql.VarChar(255), String(email).trim().toLowerCase())
+      .input('passwordHash', sql.VarChar(255), passwordHash)
+      .query('UPDATE Users SET PasswordHash = @passwordHash WHERE Email = @email');
+
+    return res.json({ message: 'Password reset successfully.' });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'Failed to reset password.' });
   }
 });
 
