@@ -16,6 +16,16 @@ export async function login(payload) {
   return response.data;
 }
 
+export async function resetPassword(payload) {
+  const response = await api.post('/api/auth/reset-password', payload);
+  return response.data;
+}
+
+export async function sendOtp(payload) {
+  const response = await api.post('/api/auth/forgot-password/send-otp', payload);
+  return response.data;
+}
+
 export async function getExams() {
   const response = await api.get('/api/exams');
   return response.data;

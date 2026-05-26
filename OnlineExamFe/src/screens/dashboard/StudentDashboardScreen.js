@@ -6,6 +6,7 @@ import {
   RefreshControl,
   ScrollView,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
   TextInput,
@@ -208,48 +209,10 @@ const SessionCard = ({ item, onPress }) => {
   );
 };
 
-const RecentSessionCard = ({ item, onPress }) => {
-  const state = getSessionState(item);
-  const canPress = state.action !== 'none';
-
-  return (
-    <TouchableOpacity
-      onPress={() => onPress && onPress(item)}
-      disabled={!canPress}
-      className="bg-surface-container-lowest rounded-2xl p-4 mb-3 border border-slate-100"
-      style={{ opacity: canPress ? 1 : 0.85 }}
-    >
-      <View className="flex-row items-center justify-between">
-        <Text className="font-extrabold text-on-surface flex-1 pr-3" numberOfLines={1}>
-          {item.SessionName || '--'}
-        </Text>
-        <View className="px-2 py-1 rounded-lg" style={state.badgeStyle}>
-          <Text className="text-xs font-bold" style={state.textStyle}>
-            {state.label}
-          </Text>
-        </View>
-      </View>
-      <View className="flex-row items-center mt-2">
-        <MaterialIcons name="class" size={14} color="#666" />
-        <Text className="text-sm text-on-surface-variant ml-1" numberOfLines={1}>
-          Lớp: {item.ClassName || '--'}
-        </Text>
-      </View>
-      <View className="flex-row items-center mt-1">
-        <MaterialIcons name="description" size={14} color="#666" />
-        <Text className="text-sm text-on-surface-variant ml-1" numberOfLines={1}>
-          Bài thi: {item.ExamTitle || '--'}
-        </Text>
-      </View>
-    </TouchableOpacity>
-  );
-};
-
 const StudentDashboardScreen = ({ route, navigation }) => {
   const user = route?.params?.user?.id ? route?.params?.user : loadAuthSession();
   const dispatch = useDispatch();
   const { showToast } = useToast();
-  
   const [summary, setSummary] = useState(null);
   const [sessions, setSessions] = useState([]);
   const [classrooms, setClassrooms] = useState([]);
@@ -258,6 +221,7 @@ const StudentDashboardScreen = ({ route, navigation }) => {
   const [error, setError] = useState('');
   const [activeMenu, setActiveMenu] = useState(route?.params?.activeMenu || 'home');
   const [searchText, setSearchText] = useState('');
+ 
   
   // Join classroom state
   const [joinCode, setJoinCode] = useState('');
@@ -281,6 +245,7 @@ const StudentDashboardScreen = ({ route, navigation }) => {
   const [newPwd, setNewPwd] = useState('');
   const [confirmPwd, setConfirmPwd] = useState('');
   const [changingPwd, setChangingPwd] = useState(false);
+  
 
   const initials = useMemo(() => {
     const fullName = user?.fullName || '';
@@ -429,6 +394,7 @@ const StudentDashboardScreen = ({ route, navigation }) => {
     }
   };
 
+ 
   const submitSessionPassword = () => {
     if (!sessionPassword.trim()) {
       showToast('Vui lòng nhập mật khẩu ca thi', 'warning');
@@ -468,6 +434,7 @@ const StudentDashboardScreen = ({ route, navigation }) => {
 
   const filteredSessions = sessions;
 
+
   const renderOverview = () => (
     <>
       <View className="flex-row gap-3 mb-3">
@@ -501,9 +468,9 @@ const StudentDashboardScreen = ({ route, navigation }) => {
         </TouchableOpacity>
       </View>
 
-      {filteredSessions.slice(0, 4).map((item) => (
-        <RecentSessionCard key={String(item.Id)} item={item} onPress={handleEnterSession} />
-      ))}
+            {filteredSessions.slice(0, 4).map((item) => (
+        <SessionCard key={String(item.Id)} item={item} onPress={handleEnterSession} />
+            ))}
 
       {filteredSessions.length === 0 ? (
         <View className="items-center py-8 bg-white rounded-2xl border border-slate-50">
@@ -514,6 +481,7 @@ const StudentDashboardScreen = ({ route, navigation }) => {
     </>
   );
 
+ 
   const onCopyJoinCode = async (code) => {
     try {
       await Clipboard.setStringAsync(code);
@@ -593,7 +561,6 @@ const StudentDashboardScreen = ({ route, navigation }) => {
       {/* List Section */}
       <View className="flex-col gap-1 mb-4">
         <Text className="text-xl font-bold text-on-surface">Lớp học của bạn</Text>
-        
       </View>
       <View className="flex-col">
         {classrooms.length > 0 ? (
@@ -619,10 +586,6 @@ const StudentDashboardScreen = ({ route, navigation }) => {
                   <Text className="text-on-surface-variant text-sm mt-1">
                     Ngày tạo: {createdAt}
                   </Text>
-
-                 
-                  
-                  
                 </View>
               </View>
             );
@@ -636,6 +599,7 @@ const StudentDashboardScreen = ({ route, navigation }) => {
     </View>
   );
 
+ 
   const renderSessions = () => {
     const activeSessions = filteredSessions.filter(s => getSessionState(s).key === 'active');
     const upcomingSessions = filteredSessions.filter(s => getSessionState(s).key === 'upcoming');

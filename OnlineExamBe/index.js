@@ -4,18 +4,7 @@ const fs = require('fs/promises');
 const path = require('path');
 const bcrypt = require('bcryptjs');
 const sql = require('mssql');
-const multer = require('multer');
-const { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } = require('@google/generative-ai');
-const PDFDocument = require('pdfkit');
-const {
-  Document,
-  Packer,
-  Paragraph,
-  TextRun,
-  HeadingLevel,
-} = require('docx');
 require('dotenv').config();
-const { searchIndex, syncDocument, deleteDocument } = require('./services/meilisearchService');
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
@@ -985,100 +974,6 @@ app.post('/api/auth/login', async (req, res) => {
       message: 'Login success',
       user: sanitizeUser(user),
     });
-  } catch (error) {
-    return res.status(500).json({ message: error.message });
-  }
-});
-
-// Update user profile (fullName, email)
-app.put('/api/users/:id/profile', async (req, res) => {
-  try {
-    const userId = Number(req.params.id);
-    const { fullName, email } = req.body;
-
-    if (!userId || (!fullName && !email)) {
-      return res.status(400).json({ message: 'Invalid parameters.' });
-    }
-
-    const pool = await getPool();
-
-    // Check email uniqueness if email is changing
-    if (email) {
-      const existing = await pool
-        .request()
-        .input('email', sql.VarChar(255), String(email).trim().toLowerCase())
-        .input('id', sql.Int, userId)
-        .query('SELECT TOP 1 Id FROM Users WHERE Email = @email AND Id <> @id');
-
-      if (existing.recordset.length > 0) {
-        return res.status(409).json({ message: 'Email already in use by another account.' });
-      }
-    }
-
-    // Perform update
-    await pool
-      .request()
-      .input('id', sql.Int, userId)
-      .input('fullName', sql.NVarChar(255), fullName ? String(fullName).trim() : null)
-      .input('email', sql.VarChar(255), email ? String(email).trim().toLowerCase() : null)
-      .query(`
-        UPDATE Users
-        SET FullName = COALESCE(@fullName, FullName),
-            Email = COALESCE(@email, Email)
-        WHERE Id = @id
-      `);
-
-    const updated = await pool
-      .request()
-      .input('id', sql.Int, userId)
-      .query('SELECT TOP 1 Id, FullName, Email, Role FROM Users WHERE Id = @id');
-
-    if (updated.recordset.length === 0) return res.status(404).json({ message: 'User not found.' });
-
-    return res.json({ message: 'Profile updated', user: sanitizeUser(updated.recordset[0]) });
-  } catch (error) {
-    return res.status(500).json({ message: error.message });
-  }
-});
-
-// Change user password
-app.put('/api/users/:id/password', async (req, res) => {
-  try {
-    const userId = Number(req.params.id);
-    const { currentPassword, newPassword } = req.body;
-
-    if (!userId || !currentPassword || !newPassword) {
-      return res.status(400).json({ message: 'userId, currentPassword and newPassword are required.' });
-    }
-
-    if (String(newPassword).length < 6) {
-      return res.status(400).json({ message: 'New password must be at least 6 characters.' });
-    }
-
-    const pool = await getPool();
-    const result = await pool
-      .request()
-      .input('id', sql.Int, userId)
-      .query('SELECT TOP 1 Id, PasswordHash FROM Users WHERE Id = @id');
-
-    if (result.recordset.length === 0) return res.status(404).json({ message: 'User not found.' });
-
-    const user = result.recordset[0];
-    let isMatch = false;
-    if (String(user.PasswordHash).startsWith('$2')) {
-      isMatch = await bcrypt.compare(currentPassword, user.PasswordHash);
-    }
-
-    if (!isMatch) return res.status(401).json({ message: 'Current password is incorrect.' });
-
-    const newHash = await bcrypt.hash(newPassword, 10);
-    await pool
-      .request()
-      .input('id', sql.Int, userId)
-      .input('passwordHash', sql.VarChar(255), newHash)
-      .query('UPDATE Users SET PasswordHash = @passwordHash WHERE Id = @id');
-
-    return res.json({ message: 'Password updated.' });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
@@ -2494,6 +2389,41 @@ app.post('/api/dashboard/teacher/:userId/sessions', async (req, res) => {
       joinCode: sessionDetail.JoinCode,
     });
 
+    // Notify students via email
+    try {
+      const studentsResult = await pool
+        .request()
+        .input('classroomId', sql.Int, classroomId)
+        .query(`
+          SELECT u.Email, u.FullName 
+          FROM ClassroomMembers cm
+          INNER JOIN Users u ON u.Id = cm.StudentId
+          WHERE cm.ClassroomId = @classroomId AND u.Role = 'Student'
+        `);
+
+      const students = studentsResult.recordset;
+      
+      if (students.length > 0 && process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+        const formattedStartTime = new Date(startDate).toLocaleString('vi-VN', { hour12: false });
+        const formattedEndTime = new Date(endDate).toLocaleString('vi-VN', { hour12: false });
+        
+        for (const student of students) {
+          const mailOptions = {
+            from: process.env.EMAIL_USER || 'Online Exam',
+            to: student.Email,
+            subject: `[Thông báo] Bài thi mới: ${sessionName}`,
+            text: `Chào ${student.FullName},\n\nGiáo viên vừa tạo một ca thi mới cho lớp học của bạn.\n\nThông tin ca thi:\n- Tên ca thi: ${sessionName}\n- Thời gian bắt đầu: ${formattedStartTime}\n- Thời gian kết thúc: ${formattedEndTime}\n- Thời lượng: ${durationInMinutes} phút\n\nVui lòng đăng nhập vào ứng dụng đúng giờ để tham gia thi.\n\nTrân trọng.`,
+          };
+          
+          transporter.sendMail(mailOptions).catch(err => console.error('Lỗi gửi email cho học sinh:', err));
+        }
+      } else if (students.length > 0) {
+         console.log(`[DEV MODE] Gửi thông báo bài thi mới tới ${students.length} học sinh (chưa cấu hình email).`);
+      }
+    } catch (notifyError) {
+      console.error('Lỗi khi lấy danh sách học sinh để gửi email:', notifyError);
+    }
+
     return res.status(201).json({
       message: 'Tạo ca thi thành công.',
       session: {
@@ -2823,6 +2753,80 @@ app.delete('/api/dashboard/teacher/:userId/sessions/:sessionId', async (req, res
       message: 'Xóa ca thi thành công.',
       sessionId,
     });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+// Học sinh tham gia lớp học bằng mã lớp (JoinCode)
+app.post('/api/dashboard/student/:userId/classrooms/join', async (req, res) => {
+  try {
+    const userId = Number(req.params.userId);
+    const joinCode = String(req.body?.joinCode || '').trim().toUpperCase();
+
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({ message: 'Invalid userId.' });
+    }
+
+    if (!joinCode) {
+      return res.status(400).json({ message: 'Vui lòng nhập mã lớp học.' });
+    }
+
+    const pool = await getPool();
+
+    // Check student role
+    const studentCheck = await pool
+      .request()
+      .input('studentId', sql.Int, userId)
+      .query(`
+        SELECT TOP 1 Id FROM Users WHERE Id = @studentId AND Role = 'Student'
+      `);
+
+    if (studentCheck.recordset.length === 0) {
+      return res.status(404).json({ message: 'Không tìm thấy học sinh.' });
+    }
+
+    // Find classroom by joinCode
+    const classroomResult = await pool
+      .request()
+      .input('joinCode', sql.VarChar(50), joinCode)
+      .query(`
+        SELECT TOP 1 Id, ClassName FROM Classrooms
+        WHERE UPPER(JoinCode) = @joinCode AND IsDeleted = 0
+      `);
+
+    if (classroomResult.recordset.length === 0) {
+      return res.status(404).json({ message: 'Mã lớp không hợp lệ hoặc lớp đã bị xóa.' });
+    }
+
+    const classroomId = classroomResult.recordset[0].Id;
+    const className = classroomResult.recordset[0].ClassName;
+
+    // Check if already joined
+    const memberCheck = await pool
+      .request()
+      .input('classroomId', sql.Int, classroomId)
+      .input('studentId', sql.Int, userId)
+      .query(`
+        SELECT TOP 1 Id FROM ClassroomMembers
+        WHERE ClassroomId = @classroomId AND StudentId = @studentId
+      `);
+
+    if (memberCheck.recordset.length > 0) {
+      return res.status(400).json({ message: `Bạn đã tham gia lớp "${className}" rồi.` });
+    }
+
+    // Join classroom
+    await pool
+      .request()
+      .input('classroomId', sql.Int, classroomId)
+      .input('studentId', sql.Int, userId)
+      .query(`
+        INSERT INTO ClassroomMembers (ClassroomId, StudentId)
+        VALUES (@classroomId, @studentId)
+      `);
+
+    return res.status(201).json({ message: `Tham gia lớp "${className}" thành công.` });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
@@ -3288,919 +3292,6 @@ app.get('/api/public/sessions/access', async (req, res) => {
     return res.status(500).json({ message: error.message });
   }
 });
-
-// Get Student Statistics
-app.get('/api/exam/student/stats/:userId', async (req, res) => {
-  try {
-    const userId = Number(req.params.userId);
-    const pool = await getPool();
-    
-    const statsResult = await pool.request()
-      .input('studentId', sql.Int, userId)
-      .query(`
-        SELECT 
-          AVG(Score) as AvgScore,
-          COUNT(*) as TotalExams,
-          SUM(CorrectAnswersCount) * 100.0 / NULLIF(SUM((SELECT COUNT(*) FROM Questions WHERE ExamPaperId = es.ExamPaperId)), 0) as CorrectRate,
-          MAX(Score) as HighestScore,
-          MIN(Score) as LowestScore
-        FROM Submissions s
-        INNER JOIN ExamSessions es ON s.ExamSessionId = es.Id
-        WHERE s.StudentId = @studentId AND s.Status = 1
-      `);
-
-    const historyResult = await pool.request()
-      .input('studentId', sql.Int, userId)
-      .query(`
-        SELECT TOP 10 Score as score, FORMAT(SubmittedAt, 'dd/MM') as date
-        FROM Submissions
-        WHERE StudentId = @studentId AND Status = 1
-        ORDER BY SubmittedAt DESC
-      `);
-
-    const stats = statsResult.recordset[0];
-    res.json({
-      avgScore: stats.AvgScore || 0,
-      totalExams: stats.TotalExams || 0,
-      correctRate: Math.round(stats.CorrectRate || 0),
-      highestScore: stats.HighestScore || 0,
-      lowestScore: stats.LowestScore || 0,
-      history: historyResult.recordset.reverse()
-    });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-});
-
-// Get Student Result History
-app.get('/api/exam/student/results/:userId', async (req, res) => {
-  try {
-    const userId = Number(req.params.userId);
-    if (!Number.isInteger(userId) || userId <= 0) {
-      return res.status(400).json({ message: 'Invalid userId.' });
-    }
-
-    const pool = await getPool();
-    const result = await pool
-      .request()
-      .input('studentId', sql.Int, userId)
-      .query(`
-        SELECT
-          s.Id AS AttemptId,
-          s.Status,
-          s.Score,
-          s.CorrectAnswersCount,
-          s.SubmittedAt,
-          s.StartedAt,
-          es.Id AS SessionId,
-          es.SessionName,
-          c.ClassName,
-          ep.Title AS ExamTitle,
-          (SELECT COUNT(*) FROM Questions q WHERE q.ExamPaperId = es.ExamPaperId) AS TotalQuestions
-        FROM Submissions s
-        INNER JOIN ExamSessions es ON es.Id = s.ExamSessionId
-        INNER JOIN Classrooms c ON c.Id = es.ClassroomId
-        INNER JOIN ExamPapers ep ON ep.Id = es.ExamPaperId
-        WHERE s.StudentId = @studentId
-          AND s.Status IN (1, 2)
-          AND c.IsDeleted = 0
-          AND ep.IsDeleted = 0
-        ORDER BY ISNULL(s.SubmittedAt, s.StartedAt) DESC, s.Id DESC
-      `);
-
-    return res.json(result.recordset);
-  } catch (error) {
-    return res.status(500).json({ message: error.message });
-  }
-});
-
-// Get Result Detail
-app.get('/api/exam/results/:attemptId/detail', async (req, res) => {
-  try {
-    const attemptId = Number(req.params.attemptId);
-    const pool = await getPool();
-    
-    const result = await pool.request()
-      .input('attemptId', sql.Int, attemptId)
-      .query(`
-        SELECT 
-          s.Score, s.CorrectAnswersCount,
-          es.IsShuffled, es.ShuffleQuestions, es.ShuffleAnswers, es.AllowViewExplanation,
-          (SELECT COUNT(*) FROM Questions q WHERE q.ExamPaperId = es.ExamPaperId) as TotalQuestions,
-          q.Id as questionId, q.Content, q.OptionA, q.OptionB, q.OptionC, q.OptionD, q.CorrectOption, q.Explanation,
-          sd.SelectedOption
-        FROM Submissions s
-        INNER JOIN ExamSessions es ON s.ExamSessionId = es.Id
-        INNER JOIN Questions q ON es.ExamPaperId = q.ExamPaperId
-        LEFT JOIN SubmissionDetails sd ON s.Id = sd.SubmissionId AND q.Id = sd.QuestionId
-        WHERE s.Id = @attemptId
-      `);
-
-    if (result.recordset.length === 0) return res.status(404).json({ message: 'Không tìm thấy kết quả.' });
-
-    const first = result.recordset[0];
-    const detail = {
-      score: first.Score,
-      correctCount: first.CorrectAnswersCount,
-      totalQuestions: first.TotalQuestions,
-      isShuffled: Boolean(first.IsShuffled),
-      shuffleQuestions: Boolean(first.ShuffleQuestions),
-      shuffleAnswers: Boolean(first.ShuffleAnswers),
-      allowViewExplanation: Boolean(first.AllowViewExplanation),
-      questions: result.recordset.map(r => ({
-        id: r.questionId,
-        content: r.Content,
-        optionA: r.OptionA,
-        optionB: r.OptionB,
-        optionC: r.OptionC,
-        optionD: r.OptionD,
-        selectedOption: r.SelectedOption,
-        correctOption: r.CorrectOption,
-        explanation: r.Explanation
-      }))
-    };
-    
-    res.json(detail);
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-});
-
-app.get('/api/ai-ocr/models', async (_req, res) => {
-  try {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      return res.status(500).json({ message: 'Missing GEMINI_API_KEY in env.' });
-    }
-
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`
-    );
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      return res.status(response.status).json({
-        message: errorData?.error?.message || 'Failed to list Gemini models.',
-      });
-    }
-
-    const data = await response.json();
-    const modelNames = Array.isArray(data?.models)
-      ? data.models.map((model) => model.name)
-      : [];
-
-    return res.json({ models: modelNames });
-  } catch (error) {
-    return res.status(500).json({ message: error.message });
-  }
-});
-
-app.get('/api/dashboard/teacher/:userId/exams/:examId', async (req, res) => {
-  try {
-    const userId = Number(req.params.userId);
-    const examId = Number(req.params.examId);
-
-    if (!Number.isInteger(userId) || userId <= 0) {
-      return res.status(400).json({ message: 'Invalid userId.' });
-    }
-
-    if (!Number.isInteger(examId) || examId <= 0) {
-      return res.status(400).json({ message: 'Invalid examId.' });
-    }
-
-    const pool = await getPool();
-
-    const teacherCheck = await pool
-      .request()
-      .input('teacherId', sql.Int, userId)
-      .query(`
-        SELECT TOP 1 Id
-        FROM Users
-        WHERE Id = @teacherId AND Role = 'Teacher'
-      `);
-
-    if (teacherCheck.recordset.length === 0) {
-      return res.status(404).json({ message: 'Teacher not found.' });
-    }
-
-    const examResult = await pool
-      .request()
-      .input('teacherId', sql.Int, userId)
-      .input('examId', sql.Int, examId)
-      .query(`
-        SELECT TOP 1
-          ep.Id,
-          ep.Title,
-          ep.Subject,
-          ep.DurationInMinutes,
-          ep.CreatedAt,
-          ep.IsDraft,
-          (SELECT COUNT(*) FROM Questions q WHERE q.ExamPaperId = ep.Id) AS QuestionCount
-        FROM ExamPapers ep
-        WHERE ep.Id = @examId
-          AND ep.TeacherId = @teacherId
-          AND ep.IsDeleted = 0
-      `);
-
-    if (examResult.recordset.length === 0) {
-      return res.status(404).json({ message: 'Exam paper not found or not owned by teacher.' });
-    }
-
-    const questionsResult = await pool
-      .request()
-      .input('examId', sql.Int, examId)
-      .query(`
-        SELECT
-          q.Id,
-          q.Content,
-          q.OptionA,
-          q.OptionB,
-          q.OptionC,
-          q.OptionD,
-          q.CorrectOption
-        FROM Questions q
-        WHERE q.ExamPaperId = @examId
-        ORDER BY q.Id ASC
-      `);
-
-    return res.json({
-      examPaper: examResult.recordset[0],
-      questions: questionsResult.recordset,
-    });
-  } catch (error) {
-    return res.status(500).json({ message: error.message });
-  }
-});
-
-app.delete('/api/dashboard/teacher/:userId/exams/:examId/questions/:questionId', async (req, res) => {
-  try {
-    const userId = Number(req.params.userId);
-    const examId = Number(req.params.examId);
-    const questionId = Number(req.params.questionId);
-
-    if (!Number.isInteger(userId) || userId <= 0) {
-      return res.status(400).json({ message: 'Invalid userId.' });
-    }
-
-    if (!Number.isInteger(examId) || examId <= 0) {
-      return res.status(400).json({ message: 'Invalid examId.' });
-    }
-
-    if (!Number.isInteger(questionId) || questionId <= 0) {
-      return res.status(400).json({ message: 'Invalid questionId.' });
-    }
-
-    const pool = await getPool();
-
-    const examCheck = await pool
-      .request()
-      .input('teacherId', sql.Int, userId)
-      .input('examId', sql.Int, examId)
-      .query(`
-        SELECT TOP 1 Id
-        FROM ExamPapers
-        WHERE Id = @examId AND TeacherId = @teacherId AND IsDeleted = 0
-      `);
-
-    if (examCheck.recordset.length === 0) {
-      return res.status(404).json({ message: 'Exam paper not found or not owned by teacher.' });
-    }
-
-    const deleteResult = await pool
-      .request()
-      .input('questionId', sql.Int, questionId)
-      .input('examId', sql.Int, examId)
-      .query(`
-        DELETE FROM Questions
-        WHERE Id = @questionId AND ExamPaperId = @examId
-      `);
-
-    if (deleteResult.rowsAffected[0] === 0) {
-      return res.status(404).json({ message: 'Question not found.' });
-    }
-
-    return res.json({ ok: true });
-  } catch (error) {
-    return res.status(500).json({ message: error.message });
-  }
-});
-
-app.post('/api/dashboard/teacher/:userId/exams/:examId/questions', async (req, res) => {
-  try {
-    const userId = Number(req.params.userId);
-    const examId = Number(req.params.examId);
-    const content = String(req.body?.content || '').trim();
-    const optionA = String(req.body?.optionA || '').trim();
-    const optionB = String(req.body?.optionB || '').trim();
-    const optionC = String(req.body?.optionC || '').trim();
-    const optionD = String(req.body?.optionD || '').trim();
-    const correctOption = String(req.body?.correctOption || '').trim().toUpperCase();
-
-    if (!Number.isInteger(userId) || userId <= 0) {
-      return res.status(400).json({ message: 'Invalid userId.' });
-    }
-
-    if (!Number.isInteger(examId) || examId <= 0) {
-      return res.status(400).json({ message: 'Invalid examId.' });
-    }
-
-    if (!content) {
-      return res.status(400).json({ message: 'Nội dung câu hỏi là bắt buộc.' });
-    }
-
-    if (!optionA || !optionB || !optionC || !optionD) {
-      return res.status(400).json({ message: 'Vui lòng nhập đủ 4 đáp án.' });
-    }
-
-    if (!['A', 'B', 'C', 'D'].includes(correctOption)) {
-      return res.status(400).json({ message: 'Đáp án đúng không hợp lệ.' });
-    }
-
-    const pool = await getPool();
-
-    const examCheck = await pool
-      .request()
-      .input('teacherId', sql.Int, userId)
-      .input('examId', sql.Int, examId)
-      .query(`
-        SELECT TOP 1 Id
-        FROM ExamPapers
-        WHERE Id = @examId AND TeacherId = @teacherId AND IsDeleted = 0
-      `);
-
-    if (examCheck.recordset.length === 0) {
-      return res.status(404).json({ message: 'Exam paper not found or not owned by teacher.' });
-    }
-
-    const insertResult = await pool
-      .request()
-      .input('examId', sql.Int, examId)
-      .input('content', sql.NVarChar(sql.MAX), content)
-      .input('optionA', sql.NVarChar(sql.MAX), optionA)
-      .input('optionB', sql.NVarChar(sql.MAX), optionB)
-      .input('optionC', sql.NVarChar(sql.MAX), optionC)
-      .input('optionD', sql.NVarChar(sql.MAX), optionD)
-      .input('correctOption', sql.Char(1), correctOption)
-      .query(`
-        INSERT INTO Questions (ExamPaperId, Content, OptionA, OptionB, OptionC, OptionD, CorrectOption)
-        OUTPUT INSERTED.Id, INSERTED.ExamPaperId, INSERTED.Content, INSERTED.OptionA, INSERTED.OptionB, INSERTED.OptionC, INSERTED.OptionD, INSERTED.CorrectOption
-        VALUES (@examId, @content, @optionA, @optionB, @optionC, @optionD, @correctOption)
-      `);
-
-    return res.status(201).json({ question: insertResult.recordset[0] });
-  } catch (error) {
-    return res.status(500).json({ message: error.message });
-  }
-});
-
-app.put('/api/dashboard/teacher/:userId/exams/:examId', async (req, res) => {
-  try {
-    const userId = Number(req.params.userId);
-    const examId = Number(req.params.examId);
-    const title = String(req.body?.title || '').trim();
-    const subject = String(req.body?.subject || '').trim();
-    const durationInMinutes = Number(req.body?.durationInMinutes);
-    const isDraft = Boolean(req.body?.isDraft);
-
-    if (!Number.isInteger(userId) || userId <= 0) {
-      return res.status(400).json({ message: 'Invalid userId.' });
-    }
-
-    if (!Number.isInteger(examId) || examId <= 0) {
-      return res.status(400).json({ message: 'Invalid examId.' });
-    }
-
-    if (!title) {
-      return res.status(400).json({ message: 'Tên đề thi là bắt buộc.' });
-    }
-
-    if (!subject) {
-      return res.status(400).json({ message: 'Môn học là bắt buộc.' });
-    }
-
-    if (!Number.isFinite(durationInMinutes) || durationInMinutes <= 0) {
-      return res.status(400).json({ message: 'Thời gian thi không hợp lệ.' });
-    }
-
-    const pool = await getPool();
-
-    const examCheck = await pool
-      .request()
-      .input('teacherId', sql.Int, userId)
-      .input('examId', sql.Int, examId)
-      .query(`
-        SELECT TOP 1 Id
-        FROM ExamPapers
-        WHERE Id = @examId AND TeacherId = @teacherId AND IsDeleted = 0
-      `);
-
-    if (examCheck.recordset.length === 0) {
-      return res.status(404).json({ message: 'Exam paper not found or not owned by teacher.' });
-    }
-
-    const updateResult = await pool
-      .request()
-      .input('examId', sql.Int, examId)
-      .input('title', sql.NVarChar(255), title)
-      .input('subject', sql.NVarChar(255), subject)
-      .input('duration', sql.Int, durationInMinutes)
-      .input('isDraft', sql.Bit, isDraft)
-      .query(`
-        UPDATE ExamPapers
-        SET Title = @title,
-            Subject = @subject,
-            DurationInMinutes = @duration,
-            IsDraft = @isDraft
-        WHERE Id = @examId
-      `);
-
-    if (updateResult.rowsAffected[0] === 0) {
-      return res.status(500).json({ message: 'Không thể cập nhật đề thi.' });
-    }
-
-    const examResult = await pool
-      .request()
-      .input('examId', sql.Int, examId)
-      .query(`
-        SELECT TOP 1
-          ep.Id,
-          ep.Title,
-          ep.Subject,
-          ep.DurationInMinutes,
-          ep.CreatedAt,
-          ep.IsDraft,
-          (SELECT COUNT(*) FROM Questions q WHERE q.ExamPaperId = ep.Id) AS QuestionCount
-        FROM ExamPapers ep
-        WHERE ep.Id = @examId
-      `);
-
-    return res.json({ examPaper: examResult.recordset[0] });
-  } catch (error) {
-    return res.status(500).json({ message: error.message });
-  }
-});
-
-app.put('/api/dashboard/teacher/:userId/exams/:examId/questions/:questionId', async (req, res) => {
-  try {
-    const userId = Number(req.params.userId);
-    const examId = Number(req.params.examId);
-    const questionId = Number(req.params.questionId);
-    const content = String(req.body?.content || '').trim();
-    const optionA = String(req.body?.optionA || '').trim();
-    const optionB = String(req.body?.optionB || '').trim();
-    const optionC = String(req.body?.optionC || '').trim();
-    const optionD = String(req.body?.optionD || '').trim();
-    const correctOption = String(req.body?.correctOption || '').trim().toUpperCase();
-
-    if (!Number.isInteger(userId) || userId <= 0) {
-      return res.status(400).json({ message: 'Invalid userId.' });
-    }
-
-    if (!Number.isInteger(examId) || examId <= 0) {
-      return res.status(400).json({ message: 'Invalid examId.' });
-    }
-
-    if (!Number.isInteger(questionId) || questionId <= 0) {
-      return res.status(400).json({ message: 'Invalid questionId.' });
-    }
-
-    if (!content) {
-      return res.status(400).json({ message: 'Nội dung câu hỏi là bắt buộc.' });
-    }
-
-    if (!optionA || !optionB || !optionC || !optionD) {
-      return res.status(400).json({ message: 'Vui lòng nhập đủ 4 đáp án.' });
-    }
-
-    if (!['A', 'B', 'C', 'D'].includes(correctOption)) {
-      return res.status(400).json({ message: 'Đáp án đúng không hợp lệ.' });
-    }
-
-    const pool = await getPool();
-
-    const examCheck = await pool
-      .request()
-      .input('teacherId', sql.Int, userId)
-      .input('examId', sql.Int, examId)
-      .query(`
-        SELECT TOP 1 Id
-        FROM ExamPapers
-        WHERE Id = @examId AND TeacherId = @teacherId AND IsDeleted = 0
-      `);
-
-    if (examCheck.recordset.length === 0) {
-      return res.status(404).json({ message: 'Exam paper not found or not owned by teacher.' });
-    }
-
-    const updateResult = await pool
-      .request()
-      .input('questionId', sql.Int, questionId)
-      .input('examId', sql.Int, examId)
-      .input('content', sql.NVarChar(sql.MAX), content)
-      .input('optionA', sql.NVarChar(sql.MAX), optionA)
-      .input('optionB', sql.NVarChar(sql.MAX), optionB)
-      .input('optionC', sql.NVarChar(sql.MAX), optionC)
-      .input('optionD', sql.NVarChar(sql.MAX), optionD)
-      .input('correctOption', sql.Char(1), correctOption)
-      .query(`
-        UPDATE Questions
-        SET Content = @content,
-            OptionA = @optionA,
-            OptionB = @optionB,
-            OptionC = @optionC,
-            OptionD = @optionD,
-            CorrectOption = @correctOption
-        WHERE Id = @questionId AND ExamPaperId = @examId
-      `);
-
-    if (updateResult.rowsAffected[0] === 0) {
-      return res.status(404).json({ message: 'Question not found.' });
-    }
-
-    const questionResult = await pool
-      .request()
-      .input('questionId', sql.Int, questionId)
-      .query(`
-        SELECT TOP 1
-          q.Id,
-          q.Content,
-          q.OptionA,
-          q.OptionB,
-          q.OptionC,
-          q.OptionD,
-          q.CorrectOption
-        FROM Questions q
-        WHERE q.Id = @questionId
-      `);
-
-    return res.json({ question: questionResult.recordset[0] });
-  } catch (error) {
-    return res.status(500).json({ message: error.message });
-  }
-});
-
-app.delete('/api/dashboard/teacher/:userId/exams/:examId', async (req, res) => {
-  try {
-    const userId = Number(req.params.userId);
-    const examId = Number(req.params.examId);
-
-    if (!Number.isInteger(userId) || userId <= 0) {
-      return res.status(400).json({ message: 'Invalid userId.' });
-    }
-
-    if (!Number.isInteger(examId) || examId <= 0) {
-      return res.status(400).json({ message: 'Invalid examId.' });
-    }
-
-    const pool = await getPool();
-
-    const examCheck = await pool
-      .request()
-      .input('teacherId', sql.Int, userId)
-      .input('examId', sql.Int, examId)
-      .query(`
-        SELECT TOP 1 Id
-        FROM ExamPapers
-        WHERE Id = @examId AND TeacherId = @teacherId AND IsDeleted = 0
-      `);
-
-    if (examCheck.recordset.length === 0) {
-      return res.status(404).json({ message: 'Exam paper not found or not owned by teacher.' });
-    }
-
-    const activeSessionsCheck = await pool
-      .request()
-      .input('examId', sql.Int, examId)
-      .query(`
-        SELECT TOP 1 Id
-        FROM ExamSessions
-        WHERE ExamPaperId = @examId AND IsDeleted = 0
-      `);
-
-    if (activeSessionsCheck.recordset.length > 0) {
-      return res.status(400).json({ message: 'Không thể xoá vì đề thi này đã được gán vào ca thi.' });
-    }
-
-    await pool
-      .request()
-      .input('examId', sql.Int, examId)
-      .query(`
-        UPDATE ExamPapers
-        SET IsDeleted = 1
-        WHERE Id = @examId
-      `);
-
-    return res.json({ ok: true });
-  } catch (error) {
-    return res.status(500).json({ message: error.message });
-  }
-});
-
-app.post('/api/dashboard/teacher/:userId/exams/:examId/copy', async (req, res) => {
-  const userId = Number(req.params.userId);
-  const examId = Number(req.params.examId);
-
-  if (!Number.isInteger(userId) || userId <= 0) {
-    return res.status(400).json({ message: 'Invalid userId.' });
-  }
-
-  if (!Number.isInteger(examId) || examId <= 0) {
-    return res.status(400).json({ message: 'Invalid examId.' });
-  }
-
-  const pool = await getPool();
-  const transaction = new sql.Transaction(pool);
-
-  try {
-    await transaction.begin();
-
-    const examResult = await new sql.Request(transaction)
-      .input('teacherId', sql.Int, userId)
-      .input('examId', sql.Int, examId)
-      .query(`
-        SELECT TOP 1
-          Id,
-          Title,
-          Subject,
-          DurationInMinutes,
-          IsDraft
-        FROM ExamPapers
-        WHERE Id = @examId AND TeacherId = @teacherId AND IsDeleted = 0
-      `);
-
-    if (examResult.recordset.length === 0) {
-      await transaction.rollback();
-      return res.status(404).json({ message: 'Exam paper not found or not owned by teacher.' });
-    }
-
-    const sourceExam = examResult.recordset[0];
-    const newTitle = `${sourceExam.Title} (Sao chép)`;
-
-    const insertExamResult = await new sql.Request(transaction)
-      .input('title', sql.NVarChar(255), newTitle)
-      .input('subject', sql.NVarChar(255), sourceExam.Subject)
-      .input('duration', sql.Int, sourceExam.DurationInMinutes)
-      .input('teacherId', sql.Int, userId)
-      .input('isDraft', sql.Bit, sourceExam.IsDraft)
-      .query(`
-        INSERT INTO ExamPapers (Title, Subject, DurationInMinutes, TeacherId, IsDraft, IsDeleted)
-        OUTPUT INSERTED.Id, INSERTED.Title, INSERTED.Subject, INSERTED.DurationInMinutes, INSERTED.CreatedAt, INSERTED.IsDraft
-        VALUES (@title, @subject, @duration, @teacherId, @isDraft, 0)
-      `);
-
-    const newExam = insertExamResult.recordset[0];
-
-    await new sql.Request(transaction)
-      .input('newExamId', sql.Int, newExam.Id)
-      .input('examId', sql.Int, examId)
-      .query(`
-        INSERT INTO Questions (ExamPaperId, Content, OptionA, OptionB, OptionC, OptionD, CorrectOption)
-        SELECT @newExamId, Content, OptionA, OptionB, OptionC, OptionD, CorrectOption
-        FROM Questions
-        WHERE ExamPaperId = @examId
-      `);
-
-    await transaction.commit();
-
-    const examWithCount = await pool
-      .request()
-      .input('examId', sql.Int, newExam.Id)
-      .query(`
-        SELECT TOP 1
-          ep.Id,
-          ep.Title,
-          ep.Subject,
-          ep.DurationInMinutes,
-          ep.CreatedAt,
-          ep.IsDraft,
-          (SELECT COUNT(*) FROM Questions q WHERE q.ExamPaperId = ep.Id) AS QuestionCount
-        FROM ExamPapers ep
-        WHERE ep.Id = @examId
-      `);
-
-    return res.status(201).json({ examPaper: examWithCount.recordset[0] });
-  } catch (error) {
-    await transaction.rollback();
-    return res.status(500).json({ message: error.message });
-  }
-});
-
-app.get('/api/dashboard/teacher/:userId/exams/:examId/export', async (req, res) => {
-  try {
-    const userId = Number(req.params.userId);
-    const examId = Number(req.params.examId);
-
-    if (!Number.isInteger(userId) || userId <= 0) {
-      return res.status(400).json({ message: 'Invalid userId.' });
-    }
-
-    if (!Number.isInteger(examId) || examId <= 0) {
-      return res.status(400).json({ message: 'Invalid examId.' });
-    }
-
-    const pool = await getPool();
-
-    const examResult = await pool
-      .request()
-      .input('teacherId', sql.Int, userId)
-      .input('examId', sql.Int, examId)
-      .query(`
-        SELECT TOP 1
-          ep.Id,
-          ep.Title,
-          ep.Subject,
-          ep.DurationInMinutes,
-          ep.CreatedAt,
-          ep.IsDraft
-        FROM ExamPapers ep
-        WHERE ep.Id = @examId AND ep.TeacherId = @teacherId AND ep.IsDeleted = 0
-      `);
-
-    if (examResult.recordset.length === 0) {
-      return res.status(404).json({ message: 'Exam paper not found or not owned by teacher.' });
-    }
-
-    const questionsResult = await pool
-      .request()
-      .input('examId', sql.Int, examId)
-      .query(`
-        SELECT
-          q.Id,
-          q.Content,
-          q.OptionA,
-          q.OptionB,
-          q.OptionC,
-          q.OptionD,
-          q.CorrectOption
-        FROM Questions q
-        WHERE q.ExamPaperId = @examId
-        ORDER BY q.Id ASC
-      `);
-
-    const exam = examResult.recordset[0];
-    const questions = questionsResult.recordset;
-    const filename = `exam-${exam.Id}.pdf`;
-
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-
-    const doc = new PDFDocument({ margin: 50 });
-    doc.pipe(res);
-
-    const fontPath = await resolvePdfFontPath();
-    if (fontPath) {
-      doc.registerFont('VN', fontPath);
-      doc.font('VN');
-    }
-
-    doc.fontSize(20).text(exam.Title || 'Exam Paper', { align: 'center' });
-    doc.moveDown(0.5);
-    doc.fontSize(12).text(`Subject: ${exam.Subject || '--'}`);
-    doc.text(`Duration: ${exam.DurationInMinutes || 0} minutes`);
-    doc.text(`Status: ${exam.IsDraft ? 'Draft' : 'Published'}`);
-    doc.moveDown(1);
-
-    questions.forEach((q, index) => {
-      doc.fontSize(12).text(`${index + 1}. ${q.Content || ''}`);
-      doc.moveDown(0.25);
-      doc.fontSize(11).text(`A. ${q.OptionA || ''}`);
-      doc.fontSize(11).text(`B. ${q.OptionB || ''}`);
-      doc.fontSize(11).text(`C. ${q.OptionC || ''}`);
-      doc.fontSize(11).text(`D. ${q.OptionD || ''}`);
-      doc.fontSize(10).fillColor('#666666').text(`Correct: ${q.CorrectOption || '--'}`);
-      doc.fillColor('#000000');
-      doc.moveDown(0.75);
-    });
-
-    doc.end();
-  } catch (error) {
-    return res.status(500).json({ message: error.message });
-  }
-});
-
-app.get('/api/dashboard/teacher/:userId/exams/:examId/export-docx', async (req, res) => {
-  try {
-    const userId = Number(req.params.userId);
-    const examId = Number(req.params.examId);
-
-    if (!Number.isInteger(userId) || userId <= 0) {
-      return res.status(400).json({ message: 'Invalid userId.' });
-    }
-
-    if (!Number.isInteger(examId) || examId <= 0) {
-      return res.status(400).json({ message: 'Invalid examId.' });
-    }
-
-    const pool = await getPool();
-
-    const examResult = await pool
-      .request()
-      .input('teacherId', sql.Int, userId)
-      .input('examId', sql.Int, examId)
-      .query(`
-        SELECT TOP 1
-          ep.Id,
-          ep.Title,
-          ep.Subject,
-          ep.DurationInMinutes,
-          ep.CreatedAt,
-          ep.IsDraft
-        FROM ExamPapers ep
-        WHERE ep.Id = @examId AND ep.TeacherId = @teacherId AND ep.IsDeleted = 0
-      `);
-
-    if (examResult.recordset.length === 0) {
-      return res.status(404).json({ message: 'Exam paper not found or not owned by teacher.' });
-    }
-
-    const questionsResult = await pool
-      .request()
-      .input('examId', sql.Int, examId)
-      .query(`
-        SELECT
-          q.Id,
-          q.Content,
-          q.OptionA,
-          q.OptionB,
-          q.OptionC,
-          q.OptionD,
-          q.CorrectOption
-        FROM Questions q
-        WHERE q.ExamPaperId = @examId
-        ORDER BY q.Id ASC
-      `);
-
-    const exam = examResult.recordset[0];
-    const questions = questionsResult.recordset;
-    const filename = `exam-${exam.Id}.docx`;
-
-    const paragraphs = [];
-    paragraphs.push(
-      new Paragraph({
-        text: exam.Title || 'Exam Paper',
-        heading: HeadingLevel.HEADING_1,
-        spacing: { after: 200 },
-      })
-    );
-
-    paragraphs.push(
-      new Paragraph({
-        children: [new TextRun(`Subject: ${exam.Subject || '--'}`)],
-      })
-    );
-    paragraphs.push(
-      new Paragraph({
-        children: [new TextRun(`Duration: ${exam.DurationInMinutes || 0} minutes`)],
-      })
-    );
-    paragraphs.push(
-      new Paragraph({
-        children: [new TextRun(`Status: ${exam.IsDraft ? 'Draft' : 'Published'}`)],
-        spacing: { after: 200 },
-      })
-    );
-
-    questions.forEach((q, index) => {
-      paragraphs.push(
-        new Paragraph({
-          children: [new TextRun(`${index + 1}. ${q.Content || ''}`)],
-          spacing: { after: 120 },
-        })
-      );
-      paragraphs.push(new Paragraph({ text: `A. ${q.OptionA || ''}` }));
-      paragraphs.push(new Paragraph({ text: `B. ${q.OptionB || ''}` }));
-      paragraphs.push(new Paragraph({ text: `C. ${q.OptionC || ''}` }));
-      paragraphs.push(new Paragraph({ text: `D. ${q.OptionD || ''}` }));
-      paragraphs.push(
-        new Paragraph({
-          children: [new TextRun(`Correct: ${q.CorrectOption || '--'}`)],
-          spacing: { after: 200 },
-        })
-      );
-    });
-
-    const doc = new Document({
-      sections: [
-        {
-          properties: {},
-          children: paragraphs,
-        },
-      ],
-    });
-
-    const buffer = await Packer.toBuffer(doc);
-
-    res.setHeader('Content-Type',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-    );
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    return res.send(buffer);
-  } catch (error) {
-    return res.status(500).json({ message: error.message });
-  }
-});
-
-
 
 app.listen(PORT, HOST, () => {
   console.log(`Server running at http://${HOST}:${PORT}`);
