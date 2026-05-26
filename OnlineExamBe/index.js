@@ -7,6 +7,13 @@ const sql = require('mssql');
 const multer = require('multer');
 const { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } = require('@google/generative-ai');
 const PDFDocument = require('pdfkit');
+const {
+  Document,
+  Packer,
+  Paragraph,
+  TextRun,
+  HeadingLevel,
+} = require('docx');
 require('dotenv').config();
 
 const app = express();
@@ -73,6 +80,26 @@ function sanitizeUser(user) {
     email: user.Email,
     role: String(user.Role).toLowerCase(),
   };
+}
+
+async function resolvePdfFontPath() {
+  const candidates = [
+    String(process.env.PDF_FONT_PATH || '').trim(),
+    path.join(__dirname, 'assets', 'fonts', 'NotoSans-Regular.ttf'),
+    'C:\\Windows\\Fonts\\arial.ttf',
+    'C:\\Windows\\Fonts\\times.ttf',
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    try {
+      await fs.access(candidate);
+      return candidate;
+    } catch (error) {
+      // Try next candidate
+    }
+  }
+
+  return null;
 }
 
 function generateJoinCode() {
@@ -210,20 +237,58 @@ async function findOverlappingSession(pool, { teacherId, classroomId, startDate,
 function normalizeOcrQuestions(rawQuestions) {
   if (!Array.isArray(rawQuestions)) return [];
 
+  const stripOptionLabel = (text, label) => {
+    const raw = String(text || '').trim();
+    if (!raw) return '';
+
+    const letter = String(label || '').trim().toUpperCase();
+    let cleaned = raw;
+
+    if (letter) {
+      const byLabel = new RegExp(`^\\s*(?:\\*\\s*)?${letter}\\s*[\\)\\.:\\-]?\\s+`, 'i');
+      cleaned = cleaned.replace(byLabel, '');
+    }
+
+    if (cleaned === raw) {
+      cleaned = cleaned.replace(/^\s*\*?\s*([A-D])\s*[\)\.:\-]\s+/, '');
+    }
+
+    cleaned = cleaned.replace(/^\s*\*\s*/, '');
+
+    return cleaned.trim();
+  };
+
   return rawQuestions
     .map((raw, index) => {
-      const question = String(raw?.question || raw?.content || '').trim();
+      const rawQuestionText = String(raw?.question || raw?.content || '');
+      const question = rawQuestionText.trim();
       const rawOptions = raw?.options;
       let options = [];
+      let hasAsterisk = false;
+
+      if (/(\*\s*[A-D])/.test(rawQuestionText.toUpperCase())) {
+        hasAsterisk = true;
+      }
 
       if (Array.isArray(rawOptions)) {
         options = rawOptions.map((opt, optIndex) => {
+          if (String(opt || '').includes('*')) {
+            hasAsterisk = true;
+          }
           if (typeof opt === 'string') {
-            return { label: String.fromCharCode(65 + optIndex), text: opt.trim() };
+            const label = String.fromCharCode(65 + optIndex);
+            const text = stripOptionLabel(opt, label);
+            return { label, text };
           }
 
           const label = String(opt?.label || '').trim().toUpperCase();
-          const text = String(opt?.text || opt?.option || '').trim();
+          if (String(opt?.label || '').includes('*')) {
+            hasAsterisk = true;
+          }
+          const text = stripOptionLabel(String(opt?.text || opt?.option || ''), label);
+          if (String(opt?.text || opt?.option || '').includes('*')) {
+            hasAsterisk = true;
+          }
           return {
             label: label || String.fromCharCode(65 + optIndex),
             text,
@@ -231,9 +296,19 @@ function normalizeOcrQuestions(rawQuestions) {
         });
       } else if (rawOptions && typeof rawOptions === 'object') {
         options = Object.entries(rawOptions).map(([label, text]) => ({
+          ...(String(label || '').includes('*') ? (hasAsterisk = true, {}) : {}),
           label: String(label || '').trim().toUpperCase(),
-          text: String(text || '').trim(),
+          text: stripOptionLabel(String(text || ''), label),
+          ...(String(text || '').includes('*') ? (hasAsterisk = true, {}) : {}),
         }));
+      }
+
+      if (raw?.hasAsterisk === true) {
+        hasAsterisk = true;
+      }
+
+      if (String(raw?.correctOption || '').includes('*')) {
+        hasAsterisk = true;
       }
 
       const filteredOptions = options.filter((opt) => opt.text);
@@ -243,19 +318,21 @@ function normalizeOcrQuestions(rawQuestions) {
       }));
 
       let correctIndex = null;
-      if (Number.isInteger(raw?.correctIndex)) {
+      if (hasAsterisk && Number.isInteger(raw?.correctIndex)) {
         correctIndex = raw.correctIndex;
-      } else if (raw?.correctOption) {
-        const letter = String(raw.correctOption).trim().toUpperCase();
+      } else if (hasAsterisk && raw?.correctOption) {
+        const letter = String(raw.correctOption).replace('*', '').trim().toUpperCase();
         const indexByLetter = normalizedOptions.findIndex((opt) => opt.label === letter);
         if (indexByLetter >= 0) correctIndex = indexByLetter;
       }
+
 
       return {
         number: raw?.number || index + 1,
         question,
         options: normalizedOptions,
         correctIndex,
+        hasAsterisk,
       };
     })
     .filter((item) => item.question || item.options.length > 0);
@@ -287,14 +364,14 @@ app.post('/api/ai-ocr/parse', upload.single('file'), async (req, res) => {
     }
 
     const genAI = new GoogleGenerativeAI(apiKey);
-
     const prompt =
       'Bạn là hệ thống OCR + trích xuất đề thi trắc nghiệm. Hãy đọc nội dung file và trả về JSON CHUAN theo mẫu: ' +
-      '{"questions": [{"number": 1, "question": "...", "options": ["A...", "B...", "C...", "D..."], "correctOption": "A"}]}. ' +
+      '{"questions": [{"number": 1, "question": "...", "options": ["A...", "B...", "C...", "D..."], "correctOption": "A", "hasAsterisk": true}]}. ' +
       'Quy tắc: (1) Tách dung noi dung theo "Câu N:". (2) Dap an bat dau bang A/B/C/D. ' +
-      '(3) Neu thay dau * hoặc ky hieu dung thi dien correctOption tuong ung, neu khong chac de rong. ' +
-      '(4) Khong chen text ngoai JSON. (5) Tu sua loi OCR pho bien: "Cau"->"Câu", "O"->"0" khi la so, "I"->"1". ' +
-      '(6) Neu thieu dap an, van tao mang options du so luong tim duoc.';
+      '(3) Neu thay dau * thi GIU NGUYEN dau * trong text va set hasAsterisk=true, set correctOption theo dap an co dau *. ' +
+      '(4) Neu khong thay dau * thi hasAsterisk=false va correctOption de rong. ' +
+      '(5) Khong chen text ngoai JSON. (6) Tu sua loi OCR pho bien: "Cau"->"Câu", "O"->"0" khi la so, "I"->"1". ' +
+      '(7) Neu thieu dap an, van tao mang options du so luong tim duoc.';
 
     const baseCandidates = [
       modelName,
@@ -376,7 +453,97 @@ app.post('/api/ai-ocr/parse', upload.single('file'), async (req, res) => {
     }
 
     const rawQuestions = Array.isArray(parsed) ? parsed : parsed?.questions;
-    const questions = normalizeOcrQuestions(rawQuestions);
+    let questions = normalizeOcrQuestions(rawQuestions);
+
+    const unanswered = questions.filter(
+      (item) =>
+        item.question &&
+        Array.isArray(item.options) &&
+        item.options.length >= 2 &&
+        !Number.isInteger(item.correctIndex)
+    );
+
+    if (unanswered.length > 0) {
+      const inferPrompt =
+        'Ban la tro ly giai de trac nghiem. ' +
+        'Voi moi cau hoi, hay chon DAP AN DUNG nhat tu cac lua chon A/B/C/D. ' +
+        'Bat buoc chon 1 dap an cho moi cau hoi, khong de trong. ' +
+        'Chi tra ve JSON theo mau: ' +
+        '{"answers":[{"number":1,"correctOption":"A"}]}.' +
+        'Khong giai thich, khong text ngoai JSON.';
+
+      const inferPayload = {
+        questions: unanswered.map((item) => ({
+          number: item.number,
+          question: item.question,
+          options: item.options.map((opt) => ({
+            label: opt.label,
+            text: opt.text,
+          })),
+        })),
+      };
+
+      let inferRaw = '';
+      for (const candidate of modelCandidates) {
+        try {
+          const model = genAI.getGenerativeModel({
+            model: candidate,
+            generationConfig: {
+              temperature: 0.2,
+              responseMimeType: 'application/json',
+            },
+            safetySettings,
+          });
+
+          const result = await model.generateContent([
+            { text: inferPrompt },
+            { text: JSON.stringify(inferPayload) },
+          ]);
+
+          inferRaw = result?.response?.text?.() || '';
+          if (inferRaw) break;
+        } catch (error) {
+          const msg = error?.message || '';
+          if (msg.includes('401') || msg.includes('403')) break;
+        }
+      }
+
+      if (inferRaw) {
+        try {
+          const cleanInfer = inferRaw.replace(/^```json\s*/i, '').replace(/\s*```$/i, '').trim();
+          const inferred = JSON.parse(cleanInfer);
+          const answers = Array.isArray(inferred) ? inferred : inferred?.answers;
+          const answerMap = new Map();
+
+          if (Array.isArray(answers)) {
+            answers.forEach((item) => {
+              const key = String(item?.number ?? '').trim();
+              const letter = String(item?.correctOption || '').trim().toUpperCase();
+              if (key && letter) {
+                answerMap.set(key, letter);
+              }
+            });
+          }
+
+          questions = questions.map((item) => {
+            if (Number.isInteger(item.correctIndex)) return item;
+            const key = String(item.number ?? '').trim();
+            const letter = answerMap.get(key);
+            if (!letter) return item;
+            const indexByLetter = item.options.findIndex((opt) => opt.label === letter);
+            if (indexByLetter < 0) return item;
+
+            return {
+              ...item,
+              correctIndex: indexByLetter,
+              aiGuessed: true,
+            };
+          });
+        } catch (error) {
+          // Ignore inference parse errors and return original questions
+        }
+      }
+    }
 
     return res.json({ questions });
   } catch (error) {
@@ -3448,6 +3615,12 @@ app.get('/api/dashboard/teacher/:userId/exams/:examId/export', async (req, res) 
     const doc = new PDFDocument({ margin: 50 });
     doc.pipe(res);
 
+    const fontPath = await resolvePdfFontPath();
+    if (fontPath) {
+      doc.registerFont('VN', fontPath);
+      doc.font('VN');
+    }
+
     doc.fontSize(20).text(exam.Title || 'Exam Paper', { align: 'center' });
     doc.moveDown(0.5);
     doc.fontSize(12).text(`Subject: ${exam.Subject || '--'}`);
@@ -3468,6 +3641,128 @@ app.get('/api/dashboard/teacher/:userId/exams/:examId/export', async (req, res) 
     });
 
     doc.end();
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+app.get('/api/dashboard/teacher/:userId/exams/:examId/export-docx', async (req, res) => {
+  try {
+    const userId = Number(req.params.userId);
+    const examId = Number(req.params.examId);
+
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({ message: 'Invalid userId.' });
+    }
+
+    if (!Number.isInteger(examId) || examId <= 0) {
+      return res.status(400).json({ message: 'Invalid examId.' });
+    }
+
+    const pool = await getPool();
+
+    const examResult = await pool
+      .request()
+      .input('teacherId', sql.Int, userId)
+      .input('examId', sql.Int, examId)
+      .query(`
+        SELECT TOP 1
+          ep.Id,
+          ep.Title,
+          ep.Subject,
+          ep.DurationInMinutes,
+          ep.CreatedAt,
+          ep.IsDraft
+        FROM ExamPapers ep
+        WHERE ep.Id = @examId AND ep.TeacherId = @teacherId AND ep.IsDeleted = 0
+      `);
+
+    if (examResult.recordset.length === 0) {
+      return res.status(404).json({ message: 'Exam paper not found or not owned by teacher.' });
+    }
+
+    const questionsResult = await pool
+      .request()
+      .input('examId', sql.Int, examId)
+      .query(`
+        SELECT
+          q.Id,
+          q.Content,
+          q.OptionA,
+          q.OptionB,
+          q.OptionC,
+          q.OptionD,
+          q.CorrectOption
+        FROM Questions q
+        WHERE q.ExamPaperId = @examId
+        ORDER BY q.Id ASC
+      `);
+
+    const exam = examResult.recordset[0];
+    const questions = questionsResult.recordset;
+    const filename = `exam-${exam.Id}.docx`;
+
+    const paragraphs = [];
+    paragraphs.push(
+      new Paragraph({
+        text: exam.Title || 'Exam Paper',
+        heading: HeadingLevel.HEADING_1,
+        spacing: { after: 200 },
+      })
+    );
+
+    paragraphs.push(
+      new Paragraph({
+        children: [new TextRun(`Subject: ${exam.Subject || '--'}`)],
+      })
+    );
+    paragraphs.push(
+      new Paragraph({
+        children: [new TextRun(`Duration: ${exam.DurationInMinutes || 0} minutes`)],
+      })
+    );
+    paragraphs.push(
+      new Paragraph({
+        children: [new TextRun(`Status: ${exam.IsDraft ? 'Draft' : 'Published'}`)],
+        spacing: { after: 200 },
+      })
+    );
+
+    questions.forEach((q, index) => {
+      paragraphs.push(
+        new Paragraph({
+          children: [new TextRun(`${index + 1}. ${q.Content || ''}`)],
+          spacing: { after: 120 },
+        })
+      );
+      paragraphs.push(new Paragraph({ text: `A. ${q.OptionA || ''}` }));
+      paragraphs.push(new Paragraph({ text: `B. ${q.OptionB || ''}` }));
+      paragraphs.push(new Paragraph({ text: `C. ${q.OptionC || ''}` }));
+      paragraphs.push(new Paragraph({ text: `D. ${q.OptionD || ''}` }));
+      paragraphs.push(
+        new Paragraph({
+          children: [new TextRun(`Correct: ${q.CorrectOption || '--'}`)],
+          spacing: { after: 200 },
+        })
+      );
+    });
+
+    const doc = new Document({
+      sections: [
+        {
+          properties: {},
+          children: paragraphs,
+        },
+      ],
+    });
+
+    const buffer = await Packer.toBuffer(doc);
+
+    res.setHeader('Content-Type',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    );
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    return res.send(buffer);
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }

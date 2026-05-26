@@ -39,6 +39,8 @@ const QuestionItem = ({
   question,
   options,
   selectedIndex,
+  aiGuessedIndex,
+  aiGuessed,
   onChangeQuestion,
   onChangeOption,
   onSelectCorrect,
@@ -62,7 +64,10 @@ const QuestionItem = ({
       {options.map((opt, index) => (
         <TouchableOpacity
           key={index}
-          style={[styles.optionItem, selectedIndex === index && styles.optionSelected]}
+          style={[
+            styles.optionItem,
+            selectedIndex === index && styles.optionSelected,
+          ]}
           onPress={() => onSelectCorrect(index)}
         >
           <View style={styles.optionLabelWrapper}>
@@ -77,6 +82,9 @@ const QuestionItem = ({
             placeholder="Nhập đáp án"
             placeholderTextColor={COLORS.onSurfaceVariant}
           />
+          {(aiGuessed && selectedIndex === index) || aiGuessedIndex === index ? (
+            <Text style={styles.aiBadgeText}>AI</Text>
+          ) : null}
           {selectedIndex === index ? (
             <MaterialIcons name="check-circle" size={18} color="#16a34a" />
           ) : null}
@@ -192,6 +200,11 @@ export default function AIOCRScreen({ navigation, route }) {
             }))
             : [],
           correctIndex: Number.isInteger(item.correctIndex) ? item.correctIndex : null,
+          aiGuessed: Boolean(item.aiGuessed),
+          aiGuessedIndex:
+            Number.isInteger(item.correctIndex) && item.aiGuessed
+              ? item.correctIndex
+              : null,
         }))
       );
     } catch (error) {
@@ -223,7 +236,16 @@ export default function AIOCRScreen({ navigation, route }) {
 
   const selectCorrectOption = (questionIndex, optionIndex) => {
     setEditableQuestions((prev) =>
-      prev.map((q, idx) => (idx === questionIndex ? { ...q, correctIndex: optionIndex } : q))
+      prev.map((q, idx) => (
+        idx === questionIndex
+          ? {
+            ...q,
+            correctIndex: optionIndex,
+            aiGuessedIndex: null,
+            aiGuessed: false,
+          }
+          : q
+      ))
     );
   };
 
@@ -348,6 +370,8 @@ export default function AIOCRScreen({ navigation, route }) {
                 question={item.question}
                 options={item.options}
                 selectedIndex={item.correctIndex}
+                aiGuessedIndex={item.aiGuessedIndex}
+                aiGuessed={item.aiGuessed}
                 onChangeQuestion={(value) => updateQuestionText(idx, value)}
                 onChangeOption={(optIndex, value) => updateOptionText(idx, optIndex, value)}
                 onSelectCorrect={(optIndex) => selectCorrectOption(idx, optIndex)}
@@ -488,7 +512,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(195, 198, 213, 0.3)',
     elevation: 1,
   },
-  questionHeader: { flexDirection: 'row', gap: 12, marginBottom: 12 },
+  questionHeader: { flexDirection: 'row', gap: 12, marginBottom: 12, alignItems: 'flex-start' },
   questionBadge: { 
     width: 24, height: 24, backgroundColor: COLORS.primaryFixed, 
     borderRadius: 4, justifyContent: 'center', alignItems: 'center' 
@@ -526,6 +550,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 0,
   },
   optionContentActive: { color: COLORS.onSurface, fontWeight: '600' },
+  aiBadgeText: { color: '#16a34a', fontSize: 10, fontWeight: '800' },
   addOptionButton: {
     alignSelf: 'flex-start',
     flexDirection: 'row',

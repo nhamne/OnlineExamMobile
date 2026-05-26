@@ -634,6 +634,27 @@ const TeacherDashboardScreen = ({ route, navigation }) => {
     }
   };
 
+  const handleExportExamDocx = async (item) => {
+    if (!user?.id || !item?.Id) {
+      showToast('Không tìm thấy thông tin đề thi.', 'error');
+      return;
+    }
+
+    const exportUrl = `${API_BASE_URL}/api/dashboard/teacher/${user.id}/exams/${item.Id}/export-docx`;
+
+    try {
+      if (Platform.OS === 'web') {
+        window.open(exportUrl, '_blank');
+      } else {
+        await Linking.openURL(exportUrl);
+      }
+    } catch (err) {
+      showToast('Không thể xuất file Word.', 'error');
+    } finally {
+      closeExamMenu();
+    }
+  };
+
   const filterKeyword = searchText.trim().toLowerCase();
   const filteredClassrooms = useMemo(
     () =>
@@ -802,6 +823,9 @@ const TeacherDashboardScreen = ({ route, navigation }) => {
                 <View style={stylesExam.dropdownMenu}>
                   <TouchableOpacity style={stylesExam.menuItem} onPress={() => handleExportExam(item)}>
                     <Text style={stylesExam.menuItemText}>Xuất PDF</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={stylesExam.menuItem} onPress={() => handleExportExamDocx(item)}>
+                    <Text style={stylesExam.menuItemText}>Xuất Word</Text>
                   </TouchableOpacity>
                   <TouchableOpacity style={stylesExam.menuItem} onPress={() => handleCopyExam(item)}>
                     <Text style={stylesExam.menuItemText}>Sao chép đề thi</Text>
