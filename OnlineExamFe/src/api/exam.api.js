@@ -42,6 +42,8 @@ const examApi = {
   
   getResultDetail: (attemptId) => api.get(`/api/exam/results/${attemptId}/detail`),
   
+  askAiExplain: (payload) => api.post('/api/ai-explain', payload),
+  
   joinClass: (classCode) => api.post('/api/class/join', { classCode }),
 };
 

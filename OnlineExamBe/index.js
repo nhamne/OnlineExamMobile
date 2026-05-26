@@ -552,6 +552,103 @@ app.post('/api/ai-ocr/parse', upload.single('file'), async (req, res) => {
   }
 });
 
+app.post('/api/ai-explain', async (req, res) => {
+  try {
+    const {
+      questionContent,
+      options,
+      studentOption,
+      studentAnswerText,
+      correctOption,
+      correctAnswerText,
+      teacherExplanation,
+    } = req.body;
+    
+    if (!questionContent || !options || !studentOption || !correctOption) {
+      return res.status(400).json({ message: 'Missing required fields.' });
+    }
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    const modelName = String(process.env.GEMINI_MODEL || 'gemini-2.5-flash').trim();
+
+    if (!apiKey) {
+      return res.status(500).json({ message: 'Missing GEMINI_API_KEY in env.' });
+    }
+
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const normalizedModelName = modelName.replace(/^models\//, '');
+    const baseCandidates = [
+      normalizedModelName,
+      modelName,
+      'gemini-2.5-flash',
+      'gemini-2.5-flash-lite',
+      'gemini-flash-latest',
+      'gemini-flash-lite-latest',
+    ].filter(Boolean);
+    const modelCandidates = Array.from(new Set(baseCandidates));
+    const safetySettings = [
+      { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+      { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
+      { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
+      { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+    ];
+
+    const prompt = `Bạn là một giáo viên tận tâm, giải thích ngắn gọn, rõ ràng và đúng trọng tâm cho học sinh.
+
+Thông tin câu hỏi:
+- Câu hỏi: ${questionContent}
+- Các đáp án: ${JSON.stringify(options, null, 2)}
+- Học sinh đã chọn: ${studentOption}${studentAnswerText ? ` - ${studentAnswerText}` : ''}
+- Đáp án đúng: ${correctOption}${correctAnswerText ? ` - ${correctAnswerText}` : ''}
+${teacherExplanation ? `- Gợi ý lời giải từ giáo viên: ${teacherExplanation}` : ''}
+
+Yêu cầu:
+1. Xưng hô là "Thầy/Cô" và gọi học sinh là "em".
+2. Nói rõ vì sao lựa chọn ${studentOption}${studentAnswerText ? ` (${studentAnswerText})` : ''} là sai hoặc chưa chính xác.
+3. Nói rõ vì sao đáp án ${correctOption}${correctAnswerText ? ` (${correctAnswerText})` : ''} mới đúng.
+4. Nếu có gợi ý lời giải từ giáo viên thì ưu tiên bám theo ý đó, nhưng diễn đạt tự nhiên cho học sinh dễ hiểu.
+5. Trả lời ngắn gọn trong 3 đến 5 câu, không dùng Markdown phức tạp, không lặp lại nguyên câu hỏi.`;
+
+    let text = '';
+    let lastError = null;
+
+    for (const candidate of modelCandidates) {
+      try {
+        const model = genAI.getGenerativeModel({
+          model: candidate,
+          generationConfig: { temperature: 0.7 },
+          safetySettings,
+        });
+
+        const contentPromise = model.generateContent(prompt);
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('Generation timeout (25s)')), 25000);
+        });
+
+        const result = await Promise.race([contentPromise, timeoutPromise]);
+        text = result?.response?.text?.() || '';
+        if (text) break;
+      } catch (error) {
+        lastError = error;
+        const msg = error?.message || '';
+        if (msg.includes('401') || msg.includes('403')) {
+          break;
+        }
+      }
+    }
+
+    if (!text) {
+      const detail = lastError?.message || 'Empty AI response';
+      return res.status(500).json({ message: 'Không thể tạo lời giải thích từ AI.', detail });
+    }
+
+    return res.json({ explanation: text.trim() });
+  } catch (error) {
+    console.error('AI Explain Error:', error);
+    return res.status(500).json({ message: error.message || 'Lỗi server khi hỏi AI' });
+  }
+});
+
 app.get('/', (_req, res) => {
   res.send('OnlineExam backend is running.');
 });

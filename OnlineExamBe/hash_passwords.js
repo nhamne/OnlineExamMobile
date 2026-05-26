@@ -4,7 +4,7 @@ const bcrypt = require('bcryptjs');
 const config = {
   server: 'localhost',
   user: 'sa',
-  password: '1234',
+  password: '123',
   database: 'OnlineExamDB',
   port: 1433,
   options: { encrypt: false, trustServerCertificate: true }
