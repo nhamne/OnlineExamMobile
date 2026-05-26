@@ -12,6 +12,8 @@ import {
   View,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
+import * as Clipboard from 'expo-clipboard';
+import { useFocusEffect } from '@react-navigation/native';
 import TeacherScreenShell from '../../components/TeacherScreenShell';
 import { useToast } from '../../context/ToastContext';
 import {
@@ -87,6 +89,13 @@ const ClassScreen = ({ route, navigation }) => {
     })();
   }, [loadData]);
 
+  useFocusEffect(
+    useCallback(() => {
+      loadData();
+      return () => {};
+    }, [loadData])
+  );
+
   useEffect(() => {
     bodyOpacity.setValue(0.94);
     Animated.timing(bodyOpacity, {
@@ -135,16 +144,11 @@ const ClassScreen = ({ route, navigation }) => {
 
   const onCopyJoinCode = async (joinCode) => {
     try {
-      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(joinCode);
-        showToast('Đã sao chép mã tham gia.', 'success');
-        return;
-      }
+      await Clipboard.setStringAsync(joinCode);
+      showToast('Đã sao chép mã tham gia.', 'success');
     } catch (_error) {
-      // ignore
+      showToast(`Mã tham gia: ${joinCode}`, 'info');
     }
-
-    showToast(`Mã tham gia: ${joinCode}`, 'info');
   };
 
   const onSelectBottomNav = (item) => {
@@ -310,6 +314,7 @@ const ClassScreen = ({ route, navigation }) => {
         { key: 'classes', label: 'Lớp học', shortLabel: 'Classes', icon: 'groups' },
         { key: 'exams', label: 'Đề thi', shortLabel: 'Exams', icon: 'description' },
         { key: 'sessions', label: 'Ca thi', shortLabel: 'Sessions', icon: 'event' },
+        { key: 'reports', label: 'Báo cáo', shortLabel: 'Reports', icon: 'bar-chart' },
       ]}
       activeKey="classes"
       onSelectBottomNav={onSelectBottomNav}

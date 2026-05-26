@@ -5,7 +5,7 @@ const path = require('path');
 const bcrypt = require('bcryptjs');
 const sql = require('mssql');
 const multer = require('multer');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } = require('@google/generative-ai');
 const PDFDocument = require('pdfkit');
 require('dotenv').config();
 
@@ -264,7 +264,7 @@ function normalizeOcrQuestions(rawQuestions) {
 app.post('/api/ai-ocr/parse', upload.single('file'), async (req, res) => {
   try {
     const apiKey = process.env.GEMINI_API_KEY;
-    const modelName = process.env.GEMINI_MODEL || 'models/gemini-2.0-flash';
+    const modelName = String(process.env.GEMINI_MODEL || 'gemini-1.5-flash').trim();
 
     if (!apiKey) {
       return res.status(500).json({ message: 'Missing GEMINI_API_KEY in env.' });
@@ -296,15 +296,22 @@ app.post('/api/ai-ocr/parse', upload.single('file'), async (req, res) => {
       '(4) Khong chen text ngoai JSON. (5) Tu sua loi OCR pho bien: "Cau"->"Câu", "O"->"0" khi la so, "I"->"1". ' +
       '(6) Neu thieu dap an, van tao mang options du so luong tim duoc.';
 
-    const modelCandidates = Array.from(
-      new Set([
-        modelName,
-        'models/gemini-2.0-flash',
-        'models/gemini-2.0-flash-001',
-        'models/gemini-2.5-flash',
-        'models/gemini-flash-latest',
-      ].filter(Boolean))
-    );
+    const baseCandidates = [
+      modelName,
+      'gemini-2.5-flash-lite',
+      'gemini-flash-lite-latest',
+      'gemini-2.5-flash',
+      'gemini-flash-latest',
+    ].filter(Boolean);
+
+    const modelCandidates = Array.from(new Set(baseCandidates));
+
+    const safetySettings = [
+      { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+      { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
+      { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
+      { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+    ];
 
     let rawText = '';
     let lastError = null;
@@ -317,9 +324,11 @@ app.post('/api/ai-ocr/parse', upload.single('file'), async (req, res) => {
             temperature: 0.2,
             responseMimeType: 'application/json',
           },
+          safetySettings,
         });
 
-        const result = await model.generateContent([
+        // Add timeout mechanism so a single model doesn't block forever
+        const contentPromise = model.generateContent([
           {
             inlineData: {
               data: req.file.buffer.toString('base64'),
@@ -329,22 +338,39 @@ app.post('/api/ai-ocr/parse', upload.single('file'), async (req, res) => {
           { text: prompt },
         ]);
 
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('Generation timeout (45s)')), 45000);
+        });
+
+        const result = await Promise.race([contentPromise, timeoutPromise]);
+
         rawText = result?.response?.text?.() || '';
         if (rawText) break;
       } catch (error) {
         lastError = error;
+        // Break early ONLY for unauthorized key errors.
+        // Other errors (404, 503, 429, 400) should allow fallback models to try.
+        const msg = error?.message || '';
+        if (msg.includes('401') || msg.includes('403')) {
+          break;
+        }
       }
     }
 
     if (!rawText) {
+      let em = lastError?.message || 'Unknown error';
+      if (em.includes('[') && em.includes(']')) em = em.substring(em.indexOf('] ') + 2);
+      if (em.length > 100) em = em.substring(0, 100) + '...';
       return res.status(500).json({
-        message: `Gemini model unavailable. Tried: ${modelCandidates.join(', ')}`,
-        detail: lastError?.message,
+        message: `OCR tạch toàn bộ model. Lỗi cuối: ${em}`,
+        detail: lastError?.message || 'Empty response',
       });
     }
+    
     let parsed;
     try {
-      parsed = JSON.parse(rawText);
+      let cleanText = rawText.replace(/^```json\s*/i, '').replace(/\s*```$/i, '').trim();
+      parsed = JSON.parse(cleanText);
     } catch (parseError) {
       return res.status(500).json({ message: 'Gemini response is not valid JSON.', rawText });
     }
@@ -569,14 +595,53 @@ app.get('/api/dashboard/teacher/:userId', async (req, res) => {
           (SELECT COUNT(*)
              FROM ExamSessions es
              INNER JOIN Classrooms c ON c.Id = es.ClassroomId
-            WHERE c.TeacherId = @teacherId AND c.IsDeleted = 0
+             INNER JOIN ExamPapers ep ON ep.Id = es.ExamPaperId
+            WHERE c.TeacherId = @teacherId AND c.IsDeleted = 0 AND es.IsDeleted = 0 AND ep.IsDeleted = 0
           ) AS SessionCount,
           (SELECT COUNT(*)
              FROM ExamSessions es
              INNER JOIN Classrooms c ON c.Id = es.ClassroomId
-            WHERE c.TeacherId = @teacherId AND c.IsDeleted = 0 AND es.EndTime >= GETDATE()
+             INNER JOIN ExamPapers ep ON ep.Id = es.ExamPaperId
+            WHERE c.TeacherId = @teacherId AND c.IsDeleted = 0 AND es.IsDeleted = 0 AND ep.IsDeleted = 0 AND es.EndTime >= GETDATE()
           ) AS UpcomingSessionCount
       `);
+
+    const statsResult = await pool
+      .request()
+      .input('teacherId', sql.Int, userId)
+      .query(`
+        SELECT COUNT(*) AS TotalStudents
+        FROM ClassroomMembers cm 
+        INNER JOIN Classrooms c ON c.Id = cm.ClassroomId 
+        WHERE c.TeacherId = @teacherId AND c.IsDeleted = 0
+      `);
+
+    const mostPopulousClassResult = await pool.request().input('teacherId', sql.Int, userId).query(`
+      SELECT TOP 1 
+        c.ClassName, 
+        COUNT(cm.StudentId) AS StudentCount
+      FROM Classrooms c
+      LEFT JOIN ClassroomMembers cm ON c.Id = cm.ClassroomId
+      WHERE c.TeacherId = @teacherId AND c.IsDeleted = 0
+      GROUP BY c.Id, c.ClassName, c.CreatedAt
+      ORDER BY StudentCount DESC, c.CreatedAt DESC, c.Id DESC
+    `);
+
+    const longestExamResult = await pool.request().input('teacherId', sql.Int, userId).query(`
+      SELECT TOP 1 Title, DurationInMinutes
+      FROM ExamPapers 
+      WHERE TeacherId = @teacherId AND IsDeleted = 0
+      ORDER BY DurationInMinutes DESC, CreatedAt DESC, Id DESC
+    `);
+
+    const mostQuestionsExamResult = await pool.request().input('teacherId', sql.Int, userId).query(`
+      SELECT TOP 1 
+        ep.Title, 
+        (SELECT COUNT(*) FROM Questions q WHERE q.ExamPaperId = ep.Id) AS QuestionCount
+      FROM ExamPapers ep 
+      WHERE ep.TeacherId = @teacherId AND ep.IsDeleted = 0
+      ORDER BY QuestionCount DESC, ep.CreatedAt DESC, ep.Id DESC
+    `);
 
     const recentClassroomsResult = await pool
       .request()
@@ -630,12 +695,19 @@ app.get('/api/dashboard/teacher/:userId', async (req, res) => {
         WHERE c.TeacherId = @teacherId
           AND c.IsDeleted = 0
           AND ep.IsDeleted = 0
+          AND es.IsDeleted = 0
         ORDER BY es.StartTime DESC, es.Id DESC
       `);
 
     return res.json({
       teacher: sanitizeUser(teacherCheck.recordset[0]),
-      summary: summaryResult.recordset[0],
+      summary: {
+        ...summaryResult.recordset[0],
+        TotalStudents: statsResult.recordset[0]?.TotalStudents || 0,
+        MostPopulousClass: mostPopulousClassResult.recordset[0] || null,
+        LongestExam: longestExamResult.recordset[0] || null,
+        MostQuestionsExam: mostQuestionsExamResult.recordset[0] || null,
+      },
       classrooms: recentClassroomsResult.recordset,
       examPapers: recentExamPapersResult.recordset,
       sessions: upcomingSessionsResult.recordset,
@@ -2223,11 +2295,22 @@ app.get('/api/dashboard/student/:userId', async (req, res) => {
           es.EndTime,
           es.DurationInMinutes,
           c.ClassName,
-          ep.Title AS ExamTitle
+          ep.Title AS ExamTitle,
+          latestSubmission.AttemptId,
+          latestSubmission.Status AS SubmissionStatus,
+          latestSubmission.SubmittedAt,
+          latestSubmission.StartedAt AS AttemptStartedAt
         FROM ExamSessions es
         INNER JOIN ClassroomMembers cm ON cm.ClassroomId = es.ClassroomId
         INNER JOIN Classrooms c ON c.Id = es.ClassroomId
         INNER JOIN ExamPapers ep ON ep.Id = es.ExamPaperId
+        OUTER APPLY (
+          SELECT TOP 1 s.Id AS AttemptId, s.Status, s.SubmittedAt, s.StartedAt
+          FROM Submissions s
+          WHERE s.ExamSessionId = es.Id
+            AND s.StudentId = @studentId
+          ORDER BY ISNULL(s.SubmittedAt, s.StartedAt) DESC, s.Id DESC
+        ) AS latestSubmission
         WHERE cm.StudentId = @studentId
           AND c.IsDeleted = 0
           AND ep.IsDeleted = 0
@@ -2242,6 +2325,275 @@ app.get('/api/dashboard/student/:userId', async (req, res) => {
     return res.status(500).json({ message: error.message });
   }
 });
+
+// GET Joined Classrooms
+app.get('/api/dashboard/student/:userId/classrooms', async (req, res) => {
+  try {
+    const userId = Number(req.params.userId);
+    const pool = await getPool();
+    const result = await pool.request()
+      .input('studentId', sql.Int, userId)
+      .query(`
+        SELECT c.Id, c.ClassName, c.JoinCode, u.FullName as TeacherName, cm.JoinedAt
+        FROM Classrooms c
+        INNER JOIN ClassroomMembers cm ON c.Id = cm.ClassroomId
+        INNER JOIN Users u ON c.TeacherId = u.Id
+        WHERE cm.StudentId = @studentId AND c.IsDeleted = 0
+        ORDER BY cm.JoinedAt DESC
+      `);
+    res.json(result.recordset);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Join Classroom by Code
+app.post('/api/class/join', async (req, res) => {
+  try {
+    const { classCode, studentId } = req.body;
+    if (!classCode) return res.status(400).json({ message: 'Mã lớp là bắt buộc.' });
+    if (!studentId) return res.status(400).json({ message: 'studentId là bắt buộc.' });
+
+    const pool = await getPool();
+    const classResult = await pool.request()
+      .input('joinCode', sql.VarChar(20), classCode.trim())
+      .query('SELECT Id FROM Classrooms WHERE JoinCode = @joinCode AND IsDeleted = 0');
+
+    if (classResult.recordset.length === 0) {
+      return res.status(404).json({ message: 'Không tìm thấy lớp học với mã này.' });
+    }
+
+    const classroomId = classResult.recordset[0].Id;
+    const existing = await pool.request()
+      .input('classroomId', sql.Int, classroomId)
+      .input('studentId', sql.Int, studentId)
+      .query('SELECT Id FROM ClassroomMembers WHERE ClassroomId = @classroomId AND StudentId = @studentId');
+
+    if (existing.recordset.length > 0) {
+      return res.status(409).json({ message: 'Bạn đã tham gia lớp học này rồi.' });
+    }
+
+    await pool.request()
+      .input('classroomId', sql.Int, classroomId)
+      .input('studentId', sql.Int, studentId)
+      .query('INSERT INTO ClassroomMembers (ClassroomId, StudentId) VALUES (@classroomId, @studentId)');
+
+    res.json({ message: 'Tham gia lớp học thành công.' });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Start Exam Attempt
+app.post('/api/exam/attempt/start/:sessionId', async (req, res) => {
+  try {
+    const sessionId = Number(req.params.sessionId);
+    const { studentId } = req.body;
+    
+    if (!studentId) return res.status(400).json({ message: 'studentId là bắt buộc.' });
+
+    const pool = await getPool();
+    const sessionResult = await pool.request()
+      .input('sessionId', sql.Int, sessionId)
+      .query(`
+        SELECT es.*, ep.DurationInMinutes as ExamDuration
+        FROM ExamSessions es
+        INNER JOIN ExamPapers ep ON es.ExamPaperId = ep.Id
+        WHERE es.Id = @sessionId AND es.IsDeleted = 0
+      `);
+    
+    if (sessionResult.recordset.length === 0) return res.status(404).json({ message: 'Không tìm thấy ca thi.' });
+    const session = sessionResult.recordset[0];
+    const examDurationInMinutes = Number(session.ExamDuration ?? 0);
+    const sessionDurationInMinutes = Number(session.DurationInMinutes ?? 0);
+    const now = new Date();
+    if (now < new Date(session.StartTime)) return res.status(403).json({ message: 'Ca thi chưa bắt đầu.' });
+    if (now > new Date(session.EndTime)) return res.status(403).json({ message: 'Ca thi đã kết thúc.' });
+
+    if (!Number.isFinite(examDurationInMinutes) || examDurationInMinutes <= 0) {
+      return res.status(500).json({ message: 'Thời lượng đề thi không hợp lệ.' });
+    }
+
+    let submissionResult = await pool.request()
+      .input('sessionId', sql.Int, sessionId)
+      .input('studentId', sql.Int, studentId)
+      .query('SELECT * FROM Submissions WHERE ExamSessionId = @sessionId AND StudentId = @studentId');
+
+    let submission;
+    if (submissionResult.recordset.length === 0) {
+      const insertResult = await pool.request()
+        .input('sessionId', sql.Int, sessionId)
+        .input('studentId', sql.Int, studentId)
+        .query(`
+          INSERT INTO Submissions (ExamSessionId, StudentId, StartedAt, Status)
+          OUTPUT INSERTED.*
+          VALUES (@sessionId, @studentId, GETDATE(), 0)
+        `);
+      submission = insertResult.recordset[0];
+    } else {
+      submission = submissionResult.recordset[0];
+      if (submission.Status !== 0) return res.status(403).json({ message: 'Bạn đã nộp bài thi này.' });
+    }
+
+    const questionsResult = await pool.request()
+      .input('examPaperId', sql.Int, session.ExamPaperId)
+      .query('SELECT Id, Content, OptionA, OptionB, OptionC, OptionD FROM Questions WHERE ExamPaperId = @examPaperId');
+
+    const questions = questionsResult.recordset.map(q => ({
+      id: q.Id,
+      content: q.Content,
+      optionA: q.OptionA,
+      optionB: q.OptionB,
+      optionC: q.OptionC,
+      optionD: q.OptionD
+    }));
+
+    res.json({
+      attempt: {
+        id: submission.Id,
+        sessionId: submission.ExamSessionId,
+        studentId: submission.StudentId,
+        startedAt: submission.StartedAt,
+        duration: examDurationInMinutes,
+        examDurationInMinutes,
+        sessionDurationInMinutes
+      },
+      questions: questions
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Save Answer
+app.post('/api/exam/attempt/save-answer', async (req, res) => {
+  try {
+    const { attemptId, questionId, optionId } = req.body;
+    const pool = await getPool();
+    
+    // UPSERT answer
+    await pool.request()
+      .input('attemptId', sql.Int, attemptId)
+      .input('questionId', sql.Int, questionId)
+      .input('optionId', sql.Char(1), optionId)
+      .query(`
+        IF EXISTS (SELECT 1 FROM SubmissionDetails WHERE SubmissionId = @attemptId AND QuestionId = @questionId)
+        BEGIN
+          UPDATE SubmissionDetails SET SelectedOption = @optionId WHERE SubmissionId = @attemptId AND QuestionId = @questionId
+        END
+        ELSE
+        BEGIN
+          INSERT INTO SubmissionDetails (SubmissionId, QuestionId, SelectedOption) VALUES (@attemptId, @questionId, @optionId)
+        END
+      `);
+    
+    res.json({ message: 'Answer saved.' });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Submit Exam
+app.post('/api/exam/attempt/submit', async (req, res) => {
+  try {
+    const { attemptId } = req.body;
+    const pool = await getPool();
+    
+    // 1. Get submission and questions
+    const subResult = await pool.request()
+      .input('attemptId', sql.Int, attemptId)
+      .query(`
+        SELECT s.ExamSessionId, q.Id as QuestionId, q.CorrectOption, sa.SelectedOption
+        FROM Submissions s
+        INNER JOIN ExamSessions es ON s.ExamSessionId = es.Id
+        INNER JOIN Questions q ON es.ExamPaperId = q.ExamPaperId
+        LEFT JOIN SubmissionDetails sa ON s.Id = sa.SubmissionId AND q.Id = sa.QuestionId
+        WHERE s.Id = @attemptId
+      `);
+    
+    if (subResult.recordset.length === 0) return res.status(404).json({ message: 'Submission not found.' });
+    
+    const records = subResult.recordset;
+    let correctCount = 0;
+    records.forEach(r => {
+      if (r.SelectedOption && r.SelectedOption === r.CorrectOption) {
+        correctCount++;
+      }
+    });
+    
+    const totalQuestions = records.length;
+    const score = (correctCount / totalQuestions) * 10;
+    
+    // 2. Update submission
+    await pool.request()
+      .input('attemptId', sql.Int, attemptId)
+      .input('score', sql.Decimal(5, 2), score)
+      .input('correctCount', sql.Int, correctCount)
+      .query(`
+        UPDATE Submissions 
+        SET Status = 1, SubmittedAt = GETDATE(), Score = @score, CorrectAnswersCount = @correctCount
+        WHERE Id = @attemptId
+      `);
+    
+    res.json({ message: 'Submitted.', score, attemptId });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Force Submit Exam (Student exits)
+app.post('/api/exam/attempt/force-submit', async (req, res) => {
+  try {
+    const { attemptId } = req.body;
+    const pool = await getPool();
+    
+    await pool.request()
+      .input('attemptId', sql.Int, attemptId)
+      .query(`
+        UPDATE Submissions 
+        SET Status = 2, SubmittedAt = GETDATE(), Score = 0, CorrectAnswersCount = 0
+        WHERE Id = @attemptId
+      `);
+    
+    res.json({ message: 'Force submitted.', score: 0, attemptId });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Log Violation (Anti-cheat)
+app.post('/api/exam/attempt/violation', async (req, res) => {
+  try {
+    const { attemptId, type, timestamp } = req.body;
+    const pool = await getPool();
+    
+    // 1. Log violation
+    await pool.request()
+      .input('attemptId', sql.Int, attemptId)
+      .input('type', sql.NVarChar, type)
+      .input('time', sql.DateTime, timestamp || new Date())
+      .query(`
+        INSERT INTO AntiCheatLogs (SubmissionId, ViolationType, ViolationTime)
+        VALUES (@attemptId, @type, @time)
+      `);
+      
+    // 2. Increment WarningCount in Submissions
+    await pool.request()
+      .input('attemptId', sql.Int, attemptId)
+      .query(`
+        UPDATE Submissions 
+        SET WarningCount = ISNULL(WarningCount, 0) + 1
+        WHERE Id = @attemptId
+      `);
+      
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('Violation log error:', error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
+
 
 app.get('/api/public/sessions/access', async (req, res) => {
   try {
@@ -2332,7 +2684,6 @@ app.get('/api/public/sessions/access', async (req, res) => {
 </body>
 </html>`);
     }
-
     return res.json({
       message,
       canAccess: !isUpcoming && !isClosed,
@@ -2344,8 +2695,136 @@ app.get('/api/public/sessions/access', async (req, res) => {
   }
 });
 
-app.listen(PORT, HOST, () => {
-  console.log(`Server running at http://${HOST}:${PORT}`);
+// Get Student Statistics
+app.get('/api/exam/student/stats/:userId', async (req, res) => {
+  try {
+    const userId = Number(req.params.userId);
+    const pool = await getPool();
+    
+    const statsResult = await pool.request()
+      .input('studentId', sql.Int, userId)
+      .query(`
+        SELECT 
+          AVG(Score) as AvgScore,
+          COUNT(*) as TotalExams,
+          SUM(CorrectAnswersCount) * 100.0 / NULLIF(SUM((SELECT COUNT(*) FROM Questions WHERE ExamPaperId = es.ExamPaperId)), 0) as CorrectRate,
+          MAX(Score) as HighestScore,
+          MIN(Score) as LowestScore
+        FROM Submissions s
+        INNER JOIN ExamSessions es ON s.ExamSessionId = es.Id
+        WHERE s.StudentId = @studentId AND s.Status = 1
+      `);
+
+    const historyResult = await pool.request()
+      .input('studentId', sql.Int, userId)
+      .query(`
+        SELECT TOP 10 Score as score, FORMAT(SubmittedAt, 'dd/MM') as date
+        FROM Submissions
+        WHERE StudentId = @studentId AND Status = 1
+        ORDER BY SubmittedAt DESC
+      `);
+
+    const stats = statsResult.recordset[0];
+    res.json({
+      avgScore: stats.AvgScore || 0,
+      totalExams: stats.TotalExams || 0,
+      correctRate: Math.round(stats.CorrectRate || 0),
+      highestScore: stats.HighestScore || 0,
+      lowestScore: stats.LowestScore || 0,
+      history: historyResult.recordset.reverse()
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Get Student Result History
+app.get('/api/exam/student/results/:userId', async (req, res) => {
+  try {
+    const userId = Number(req.params.userId);
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({ message: 'Invalid userId.' });
+    }
+
+    const pool = await getPool();
+    const result = await pool
+      .request()
+      .input('studentId', sql.Int, userId)
+      .query(`
+        SELECT
+          s.Id AS AttemptId,
+          s.Status,
+          s.Score,
+          s.CorrectAnswersCount,
+          s.SubmittedAt,
+          s.StartedAt,
+          es.Id AS SessionId,
+          es.SessionName,
+          c.ClassName,
+          ep.Title AS ExamTitle,
+          (SELECT COUNT(*) FROM Questions q WHERE q.ExamPaperId = es.ExamPaperId) AS TotalQuestions
+        FROM Submissions s
+        INNER JOIN ExamSessions es ON es.Id = s.ExamSessionId
+        INNER JOIN Classrooms c ON c.Id = es.ClassroomId
+        INNER JOIN ExamPapers ep ON ep.Id = es.ExamPaperId
+        WHERE s.StudentId = @studentId
+          AND s.Status IN (1, 2)
+          AND c.IsDeleted = 0
+          AND ep.IsDeleted = 0
+        ORDER BY ISNULL(s.SubmittedAt, s.StartedAt) DESC, s.Id DESC
+      `);
+
+    return res.json(result.recordset);
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+// Get Result Detail
+app.get('/api/exam/results/:attemptId/detail', async (req, res) => {
+  try {
+    const attemptId = Number(req.params.attemptId);
+    const pool = await getPool();
+    
+    const result = await pool.request()
+      .input('attemptId', sql.Int, attemptId)
+      .query(`
+        SELECT 
+          s.Score, s.CorrectAnswersCount,
+          (SELECT COUNT(*) FROM Questions q WHERE q.ExamPaperId = es.ExamPaperId) as TotalQuestions,
+          q.Id as questionId, q.Content, q.OptionA, q.OptionB, q.OptionC, q.OptionD, q.CorrectOption, q.Explanation,
+          sd.SelectedOption
+        FROM Submissions s
+        INNER JOIN ExamSessions es ON s.ExamSessionId = es.Id
+        INNER JOIN Questions q ON es.ExamPaperId = q.ExamPaperId
+        LEFT JOIN SubmissionDetails sd ON s.Id = sd.SubmissionId AND q.Id = sd.QuestionId
+        WHERE s.Id = @attemptId
+      `);
+
+    if (result.recordset.length === 0) return res.status(404).json({ message: 'Không tìm thấy kết quả.' });
+
+    const first = result.recordset[0];
+    const detail = {
+      score: first.Score,
+      correctCount: first.CorrectAnswersCount,
+      totalQuestions: first.TotalQuestions,
+      questions: result.recordset.map(r => ({
+        id: r.questionId,
+        content: r.Content,
+        optionA: r.OptionA,
+        optionB: r.OptionB,
+        optionC: r.OptionC,
+        optionD: r.OptionD,
+        selectedOption: r.SelectedOption,
+        correctOption: r.CorrectOption,
+        explanation: r.Explanation
+      }))
+    };
+    
+    res.json(detail);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
 });
 
 app.get('/api/ai-ocr/models', async (_req, res) => {
@@ -2790,6 +3269,19 @@ app.delete('/api/dashboard/teacher/:userId/exams/:examId', async (req, res) => {
       return res.status(404).json({ message: 'Exam paper not found or not owned by teacher.' });
     }
 
+    const activeSessionsCheck = await pool
+      .request()
+      .input('examId', sql.Int, examId)
+      .query(`
+        SELECT TOP 1 Id
+        FROM ExamSessions
+        WHERE ExamPaperId = @examId AND IsDeleted = 0
+      `);
+
+    if (activeSessionsCheck.recordset.length > 0) {
+      return res.status(400).json({ message: 'Không thể xoá vì đề thi này đã được gán vào ca thi.' });
+    }
+
     await pool
       .request()
       .input('examId', sql.Int, examId)
@@ -2979,4 +3471,10 @@ app.get('/api/dashboard/teacher/:userId/exams/:examId/export', async (req, res) 
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
+});
+
+
+
+app.listen(PORT, HOST, () => {
+  console.log(`Server running at http://${HOST}:${PORT}`);
 });

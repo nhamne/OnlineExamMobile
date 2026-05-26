@@ -144,6 +144,7 @@ const ClassroomManagementScreen = ({ route, navigation }) => {
         { key: 'classes', label: 'Lớp học', shortLabel: 'Classes', icon: 'groups' },
         { key: 'exams', label: 'Đề thi', shortLabel: 'Exams', icon: 'description' },
         { key: 'sessions', label: 'Ca thi', shortLabel: 'Sessions', icon: 'event' },
+        { key: 'reports', label: 'Báo cáo', shortLabel: 'Reports', icon: 'bar-chart' },
       ]}
       activeKey="classes"
       onSelectBottomNav={onSelectBottomNav}

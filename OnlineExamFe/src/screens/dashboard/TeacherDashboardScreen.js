@@ -21,6 +21,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import { Calendar, FileText, Filter, MoreVertical, Plus, Search } from 'lucide-react-native';
 import TeacherScreenShell from '../../components/TeacherScreenShell';
+import TeacherReportContent from './TeacherReportContent';
 import { API_BASE_URL } from '../../config/api';
 import { useToast } from '../../context/ToastContext';
 import { clearAuthSession } from '../../services/authSession';
@@ -38,6 +39,7 @@ const bottomNavItems = [
   { key: 'classes', label: 'Lớp học', shortLabel: 'Classes', icon: 'groups' },
   { key: 'exams', label: 'Đề thi', shortLabel: 'Exams', icon: 'description' },
   { key: 'sessions', label: 'Ca thi', shortLabel: 'Sessions', icon: 'event' },
+  { key: 'reports', label: 'Báo cáo', shortLabel: 'Reports', icon: 'bar-chart' },
 ];
 
 const formatDateTime = (value) => {
@@ -130,7 +132,7 @@ const TeacherDashboardScreen = ({ route, navigation }) => {
   const initialTab = route?.params?.initialTab;
 
   const getStartingTab = () => {
-    const allowedTabs = new Set(['home', 'exams']);
+    const allowedTabs = new Set(['home', 'exams', 'reports']);
     return allowedTabs.has(initialTab) ? initialTab : 'home';
   };
 
@@ -1013,6 +1015,16 @@ const TeacherDashboardScreen = ({ route, navigation }) => {
 
   const renderContentByTab = () => {
     if (activeTab === 'exams') return renderExamPapers();
+    if (activeTab === 'reports') {
+      return (
+        <TeacherReportContent 
+          summary={summary} 
+          classrooms={classrooms} 
+          examPapers={examPapers} 
+          sessions={sessions} 
+        />
+      );
+    }
     return (
       <>
         {renderSummaryCards()}
@@ -1056,7 +1068,7 @@ const TeacherDashboardScreen = ({ route, navigation }) => {
       <ScrollView
         style={{ flex: 1, minHeight: 0 }}
         className="px-4"
-        showsVerticalScrollIndicator={true}
+        showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ paddingTop: 0, paddingBottom: 24 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
@@ -1067,8 +1079,8 @@ const TeacherDashboardScreen = ({ route, navigation }) => {
               ? 'Tổng quan'
               : bottomNavItems.find((i) => i.key === activeTab)?.label}
           </Text>
-          {/* Ẩn dòng chào mừng khi ở tab Đề thi */}
-          {activeTab !== 'exams' && (
+          {/* Ẩn dòng chào mừng khi ở tab Đề thi và Báo cáo */}
+          {!['exams', 'reports'].includes(activeTab) && (
             <Text className="text-3xl font-semibold text-on-surface tracking-tight leading-tight" numberOfLines={2}>
               Chào mừng trở lại,{"\n"}{displayTeacher?.fullName || 'Giáo viên'}!
             </Text>

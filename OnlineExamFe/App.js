@@ -5,6 +5,8 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import AppNavigator from './src/navigation/AppNavigator';
 import { ToastProvider } from './src/context/ToastContext';
 import { loadAuthSession } from './src/services/authSession';
+import { Provider } from 'react-redux';
+import { store } from './src/store';
 
 export default function App() {
   const [bootstrapping, setBootstrapping] = useState(true);
@@ -36,13 +38,15 @@ export default function App() {
   }
 
   return (
-    <SafeAreaProvider>
-      <ToastProvider>
-        <View style={{ flex: 1 }}>
-          <StatusBar style="dark" translucent={false} backgroundColor="#FFFFFF" />
-          <AppNavigator initialRouteName={initialRouteName} initialUser={initialUser} />
-        </View>
-      </ToastProvider>
-    </SafeAreaProvider>
+    <Provider store={store}>
+      <SafeAreaProvider>
+        <ToastProvider>
+          <View style={{ flex: 1 }}>
+            <StatusBar style="dark" translucent={false} backgroundColor="#FFFFFF" />
+            <AppNavigator initialRouteName={initialRouteName} initialUser={initialUser} />
+          </View>
+        </ToastProvider>
+      </SafeAreaProvider>
+    </Provider>
   );
 }

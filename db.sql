@@ -186,3 +186,15 @@ BEGIN
     );
 END
 GO
+-- 10. Bảng AntiCheatLogs (Nhật ký gian lận)
+IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='AntiCheatLogs' AND xtype='U')
+BEGIN
+    CREATE TABLE AntiCheatLogs (
+        Id INT IDENTITY(1,1) PRIMARY KEY,
+        SubmissionId INT NOT NULL FOREIGN KEY REFERENCES Submissions(Id),
+        ViolationType NVARCHAR(50),
+        ViolationTime DATETIME DEFAULT GETDATE(),
+        Details NVARCHAR(MAX)
+    );
+END
+GO

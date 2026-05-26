@@ -11,8 +11,10 @@ import {
   ActivityIndicator,
   Modal,
   TextInput,
+  StatusBar,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useToast } from '../../context/ToastContext';
 import {
   createTeacherExamQuestion,
@@ -152,6 +154,7 @@ const QuestionCard = ({
 
 export default function ExamDetailScreen({ navigation, route }) {
   const { showToast } = useToast();
+  const insets = useSafeAreaInsets();
   const routeExam = route?.params?.exam || null;
   const user = route?.params?.user || null;
   const examId = routeExam?.Id || routeExam?.id || route?.params?.examId || null;
@@ -659,7 +662,7 @@ export default function ExamDetailScreen({ navigation, route }) {
   };
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: Math.max(insets.top, Platform.OS === 'android' ? (StatusBar.currentHeight || 0) : 0) }]}>
         <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
           <MaterialIcons name="arrow-back" size={20} color={COLORS.primary} />
         </TouchableOpacity>
@@ -682,7 +685,10 @@ export default function ExamDetailScreen({ navigation, route }) {
           <Text style={styles.loadingText}>Đang tải chi tiết đề thi...</Text>
         </View>
       ) : (
-        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          contentContainerStyle={[styles.scrollContent, { paddingBottom: 128 + insets.bottom }]}
+          showsVerticalScrollIndicator={false}
+        >
           {error ? (
             <View style={styles.errorBoxInline}>
               <Text style={styles.errorTextInline}>{error}</Text>
@@ -784,7 +790,11 @@ export default function ExamDetailScreen({ navigation, route }) {
         </ScrollView>
       )}
 
-      <TouchableOpacity style={styles.fabContainer} activeOpacity={0.8} onPress={handleOpenAddModal}>
+      <TouchableOpacity
+        style={[styles.fabContainer, { bottom: 12 + insets.bottom }]}
+        activeOpacity={0.8}
+        onPress={handleOpenAddModal}
+      >
         <View style={styles.fabGradient}>
           <MaterialIcons name="add" size={24} color="#fff" />
           <Text style={styles.fabText}>Thêm câu hỏi</Text>
@@ -858,7 +868,8 @@ export default function ExamDetailScreen({ navigation, route }) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.surface },
   header: {
-    height: 64,
+    minHeight: 56,
+    paddingVertical: 10,
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,

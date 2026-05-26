@@ -10,15 +10,32 @@ import {
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { getExams } from '../../services/authService';
+import { COLORS } from '../../constants/theme';
+import { clearAuthSession } from '../../services/authSession';
 
 const ExamItem = ({ item }) => {
   return (
-    <View className="rounded-xl bg-surface-container-lowest p-4 mb-3">
-      <Text className="text-base font-bold text-on-surface mb-1">{item.title}</Text>
-      <Text className="text-sm text-on-surface-variant mb-1">Giảng viên: {item.teacherName}</Text>
-      <View className="flex-row items-center gap-1">
-        <MaterialIcons name="schedule" size={16} color="#727785" />
-        <Text className="text-sm text-on-surface-variant">{item.durationInMinutes} phút</Text>
+    <View className="rounded-2xl bg-white p-5 mb-4 shadow-sm border border-slate-100">
+      <View className="flex-row justify-between items-start mb-2">
+        <Text className="text-lg font-black text-on-surface flex-1 pr-2" numberOfLines={2}>
+          {item.title}
+        </Text>
+        <View className="bg-blue-50 px-2 py-1 rounded-lg">
+          <Text className="text-xs font-bold text-primary">{item.durationInMinutes}ph</Text>
+        </View>
+      </View>
+      
+      <View className="flex-row items-center gap-4 mt-2">
+        <View className="flex-row items-center">
+          <MaterialIcons name="person" size={14} color={COLORS.textSecondary} />
+          <Text className="text-xs text-on-surface-variant ml-1">{item.teacherName}</Text>
+        </View>
+        <View className="flex-row items-center">
+          <MaterialIcons name="calendar-today" size={14} color={COLORS.textSecondary} />
+          <Text className="text-xs text-on-surface-variant ml-1">
+            {new Date(item.createdAt).toLocaleDateString('vi-VN')}
+          </Text>
+        </View>
       </View>
     </View>
   );
@@ -55,25 +72,49 @@ const HomeScreen = ({ route, navigation }) => {
     setRefreshing(false);
   }, [loadExams]);
 
+  const handleLogout = () => {
+    clearAuthSession();
+    navigation.replace('Login');
+  };
+
   if (loading) {
     return (
       <SafeAreaView className="flex-1 items-center justify-center bg-surface-container-low px-4">
-        <ActivityIndicator size="large" color="#005bbf" />
-        <Text className="mt-3 text-on-surface-variant">Đang tải dữ liệu...</Text>
+        <ActivityIndicator size="large" color={COLORS.primary} />
+        <Text className="mt-3 text-on-surface-variant font-medium">Đang tải dữ liệu...</Text>
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView className="flex-1 bg-surface-container-low px-4 pt-4">
-      <View className="mb-4">
-        <Text className="text-xl font-black text-on-surface">Xin chào, {user?.fullName || 'bạn'}!</Text>
-        <Text className="text-on-surface-variant">Danh sách đề thi từ cơ sở dữ liệu SQL Server</Text>
+    <SafeAreaView className="flex-1 bg-surface-container-low">
+      <View className="px-6 pt-6 pb-4">
+        <View className="flex-row justify-between items-center mb-6">
+          <View>
+            <Text className="text-on-surface-variant font-bold text-xs uppercase tracking-widest">Khám phá</Text>
+            <Text className="text-3xl font-black text-on-surface tracking-tight">
+              Xin chào, {user?.fullName?.split(' ').pop() || 'bạn'}!
+            </Text>
+          </View>
+          <TouchableOpacity 
+            onPress={handleLogout}
+            className="w-10 h-10 rounded-full bg-red-50 items-center justify-center"
+          >
+            <MaterialIcons name="logout" size={20} color={COLORS.danger} />
+          </TouchableOpacity>
+        </View>
+        
+        <View className="bg-primary/5 p-4 rounded-2xl border border-primary/10 mb-2">
+          <Text className="text-primary font-bold">Mẹo học tập</Text>
+          <Text className="text-on-surface-variant text-sm mt-1">
+            Hãy ôn luyện các đề thi mới nhất để đạt kết quả cao trong kỳ thi sắp tới.
+          </Text>
+        </View>
       </View>
 
       {error ? (
-        <View className="rounded-lg bg-red-100 px-3 py-2 mb-3">
-          <Text className="text-red-700 text-sm">{error}</Text>
+        <View className="mx-6 rounded-xl bg-red-100 px-4 py-3 mb-4 border border-red-200">
+          <Text className="text-red-700 text-sm font-medium">{error}</Text>
         </View>
       ) : null}
 
@@ -81,21 +122,16 @@ const HomeScreen = ({ route, navigation }) => {
         data={exams}
         keyExtractor={(item) => String(item.id)}
         renderItem={({ item }) => <ExamItem item={item} />}
+        contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 100 }}
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         ListEmptyComponent={
-          <View className="items-center py-10">
-            <Text className="text-on-surface-variant">Chưa có dữ liệu đề thi.</Text>
+          <View className="items-center py-20">
+            <MaterialIcons name="description" size={64} color="#CBD5E1" />
+            <Text className="text-on-surface-variant mt-4 font-medium">Chưa có dữ liệu đề thi.</Text>
           </View>
         }
       />
-
-      <TouchableOpacity
-        className="absolute right-4 bottom-6 bg-primary rounded-full px-5 py-3"
-        onPress={() => navigation.replace('Login')}
-      >
-        <Text className="text-white font-bold">Đăng xuất</Text>
-      </TouchableOpacity>
     </SafeAreaView>
   );
 };

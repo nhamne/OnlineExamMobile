@@ -10,6 +10,7 @@ const bottomNavItems = [
   { key: 'classes', label: 'Lớp học', shortLabel: 'Classes', icon: 'groups' },
   { key: 'exams', label: 'Đề thi', shortLabel: 'Exams', icon: 'description' },
   { key: 'sessions', label: 'Ca thi', shortLabel: 'Sessions', icon: 'event' },
+  { key: 'reports', label: 'Báo cáo', shortLabel: 'Reports', icon: 'bar-chart' },
 ];
 
 const TeacherProfileScreen = ({ route, navigation }) => {
@@ -85,7 +86,7 @@ const TeacherProfileScreen = ({ route, navigation }) => {
 
             <View className="mt-5 rounded-2xl p-4" style={{ backgroundColor: '#eef2ff' }}>
               <Text className="text-xs uppercase font-bold text-on-surface-variant mb-2">Thông tin hiển thị</Text>
-              <Text className="text-sm text-on-surface mt-1">Mã tài khoản: {user.id || '--'}</Text>
+              
               <Text className="text-sm text-on-surface mt-1">Họ và tên: {user.fullName || '--'}</Text>
               <Text className="text-sm text-on-surface mt-1">Email: {user.email || '--'}</Text>
             </View>

@@ -13,6 +13,7 @@ import {
   Modal,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const COLORS = {
   primary: '#005BBF',
@@ -122,6 +123,7 @@ const buildTextFromQuestions = (questions) => {
 
 
 const ExamEditorContent = ({ navigation, route }) => {
+  const insets = useSafeAreaInsets();
   const user = route?.params?.user || null;
   const [inputText, setInputText] = useState('');
   const editorRef = useRef(null);
@@ -184,7 +186,10 @@ const ExamEditorContent = ({ navigation, route }) => {
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: 24 + insets.bottom }]}
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.headerSection}>
           <TouchableOpacity
             style={styles.backButton}
@@ -229,7 +234,7 @@ const ExamEditorContent = ({ navigation, route }) => {
         </View>
       </ScrollView>
 
-      <View style={styles.footer}>
+      <View style={[styles.footer, { paddingBottom: 16 + insets.bottom }]}>
         <TouchableOpacity
           style={styles.primaryButton}
           onPress={handleContinue}
