@@ -1,3 +1,9 @@
 node_modules/
 OnlineExamBe/node_modules/
 OnlineExamFe/node_modules/
+
+# Environment variables - KHÔNG commit key lên git
+.env
+OnlineExamBe/.env
+OnlineExamFe/.env
+*.env

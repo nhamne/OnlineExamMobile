@@ -7,6 +7,7 @@ import {
   ScrollView,
   StyleSheet,
   Platform,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -34,10 +35,63 @@ const ambientShadow = {
   shadowRadius: 12,
 };
 
+function buildDisplayAnswerMap(question, randomFunc, shouldShuffleAnswers) {
+  const baseAnswers = [
+    { originalKey: 'A', text: question.optionA },
+    { originalKey: 'B', text: question.optionB },
+    { originalKey: 'C', text: question.optionC },
+    { originalKey: 'D', text: question.optionD },
+  ];
+  const orderedAnswers = shouldShuffleAnswers ? seededShuffleArray(baseAnswers, randomFunc) : baseAnswers;
+  const displaySlots = ['A', 'B', 'C', 'D'];
+  const displayAnswerMap = {};
+  let selectedDisplayOption = question.selectedOption || null;
+  let correctDisplayOption = question.correctOption || null;
+
+  orderedAnswers.forEach((answer, index) => {
+    const displayKey = displaySlots[index];
+    displayAnswerMap[displayKey] = answer.text;
+
+    if (question.selectedOption === answer.originalKey) {
+      selectedDisplayOption = displayKey;
+    }
+
+    if (question.correctOption === answer.originalKey) {
+      correctDisplayOption = displayKey;
+    }
+  });
+
+  return {
+    displaySlots,
+    displayAnswerMap,
+    selectedDisplayOption,
+    correctDisplayOption,
+  };
+}
+
+function buildFallbackExplanation(item) {
+  const optionsObj = item.displayAnswerMap || {};
+  const studentOption = item.selectedDisplayOption || 'Không chọn';
+  const correctOption = item.correctDisplayOption || item.correctOption;
+  const studentAnswerText = item.selectedDisplayOption ? optionsObj[item.selectedDisplayOption] : '';
+  const correctAnswerText = correctOption ? optionsObj[correctOption] : '';
+  const teacherExplanation = String(item.explanation || '').trim();
+
+  if (teacherExplanation) {
+    return `Em chọn ${studentOption}${studentAnswerText ? ` (${studentAnswerText})` : ''} chưa đúng. Đáp án đúng là ${correctOption}${correctAnswerText ? ` (${correctAnswerText})` : ''}. ${teacherExplanation}`;
+  }
+
+  return `Em chọn ${studentOption}${studentAnswerText ? ` (${studentAnswerText})` : ''} chưa đúng. Đáp án đúng là ${correctOption}${correctAnswerText ? ` (${correctAnswerText})` : ''}. Em xem lại ý nghĩa của đáp án đúng để rút kinh nghiệm cho câu sau nhé.`;
+}
+
 const StudentExamDetailScreen = ({ route, navigation }) => {
   const { attemptId, sessionName } = route?.params || {};
   const [loading, setLoading] = useState(true);
   const [detail, setDetail] = useState(null);
+
+  const [aiModalVisible, setAiModalVisible] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiExplanation, setAiExplanation] = useState('');
 
   useEffect(() => {
     const fetchDetail = async () => {
@@ -52,14 +106,10 @@ const StudentExamDetailScreen = ({ route, navigation }) => {
           pool = seededShuffleArray(pool, randomFunc);
         }
         
-        data.questions = pool.map(q => {
-          const baseSlots = ['A', 'B', 'C', 'D'];
-          const slots = (data.isShuffled && data.shuffleAnswers) ? seededShuffleArray(baseSlots, randomFunc) : baseSlots;
-          return {
-            ...q,
-            displaySlots: slots
-          };
-        });
+        data.questions = pool.map((q) => ({
+          ...q,
+          ...buildDisplayAnswerMap(q, randomFunc, Boolean(data.isShuffled && data.shuffleAnswers)),
+        }));
 
         setDetail(data);
       } catch (error) {
@@ -93,28 +143,73 @@ const StudentExamDetailScreen = ({ route, navigation }) => {
     );
   }
 
+  const handleAskAI = async (item) => {
+    setAiExplanation('');
+    setAiLoading(true);
+    setAiModalVisible(true);
+
+    try {
+      const optionsObj = item.displayAnswerMap || {};
+      const studentOption = item.selectedDisplayOption || 'Không chọn';
+      const correctOption = item.correctDisplayOption || item.correctOption;
+
+      const payload = {
+        questionContent: item.content,
+        options: optionsObj,
+        studentOption,
+        studentAnswerText: item.selectedDisplayOption ? optionsObj[item.selectedDisplayOption] : null,
+        correctOption,
+        correctAnswerText: correctOption ? optionsObj[correctOption] : null,
+        teacherExplanation: item.explanation || null
+      };
+
+      const res = await examApi.askAiExplain(payload);
+      setAiExplanation(res.data.explanation);
+    } catch (error) {
+      console.error('AI Explain Error:', error);
+      setAiExplanation(buildFallbackExplanation(item));
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
   const renderQuestion = (item, index) => {
-    const isCorrect = item.selectedOption === item.correctOption;
+    const isCorrect = item.selectedDisplayOption === item.correctDisplayOption;
     const canViewExplanation = detail.allowViewExplanation !== false;
     
     return (
       <View style={styles.card}>
         <View style={styles.cardHeader}>
-          <Text style={styles.questionLabel}>CÂU {index + 1}</Text>
-          {canViewExplanation && (
-            <MaterialIcons 
-              name={isCorrect ? "check-circle" : "cancel"} 
-              size={18} 
-              color={isCorrect ? '#166534' : '#dc2626'} 
-            />
-          )}
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <Text style={styles.questionLabel}>CÂU {index + 1}</Text>
+            {canViewExplanation && (
+              <Text style={[styles.questionLabel, { marginLeft: 4, color: isCorrect ? '#166534' : '#dc2626' }]}>
+                ({isCorrect ? 'Đúng' : 'Sai'})
+              </Text>
+            )}
+          </View>
+          
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            {canViewExplanation && !isCorrect && (
+              <TouchableOpacity style={styles.aiButton} onPress={() => handleAskAI(item)}>
+                <Text style={styles.aiButtonText}>🤖 Hỏi AI giải thích</Text>
+              </TouchableOpacity>
+            )}
+            {canViewExplanation && (
+              <MaterialIcons 
+                name={isCorrect ? "check-circle" : "cancel"} 
+                size={18} 
+                color={isCorrect ? '#166534' : '#dc2626'} 
+              />
+            )}
+          </View>
         </View>
         <Text style={styles.questionText}>{item.content}</Text>
         
         <View style={styles.optionsList}>
           {(item.displaySlots || ['A', 'B', 'C', 'D']).map(opt => {
-            const isSelected = item.selectedOption === opt;
-            const isCorrectOpt = item.correctOption === opt;
+            const isSelected = item.selectedDisplayOption === opt;
+            const isCorrectOpt = item.correctDisplayOption === opt;
             
             let itemStyle = [styles.optionItem];
             let dotStyle = [styles.optionDot];
@@ -144,7 +239,7 @@ const StudentExamDetailScreen = ({ route, navigation }) => {
               <View key={opt} style={itemStyle}>
                 <View style={dotStyle} />
                 <Text style={labelStyle}>{opt}.</Text>
-                <Text style={textStyle}>{item[`option${opt}`]}</Text>
+                <Text style={textStyle}>{item.displayAnswerMap?.[opt]}</Text>
                 {icon}
               </View>
             );
@@ -214,6 +309,45 @@ const StudentExamDetailScreen = ({ route, navigation }) => {
             : null}
         </View>
       </ScrollView>
+
+      <Modal
+        animationType="fade"
+        transparent={true}
+        visible={aiModalVisible}
+        onRequestClose={() => setAiModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Giải thích của Giáo viên AI 🤖</Text>
+            
+            <ScrollView style={styles.modalScroll}>
+              {aiLoading ? (
+                <View style={{ alignItems: 'center', paddingVertical: 20 }}>
+                  <ActivityIndicator size="large" color={COLORS.primary} />
+                  <Text style={{ marginTop: 12, color: COLORS.onSurfaceVariant }}>Đang phân tích câu trả lời...</Text>
+                </View>
+              ) : (
+                <View style={styles.aiChatBubble}>
+                  <View style={styles.aiAvatar}>
+                    <Text style={{ fontSize: 20 }}>🤖</Text>
+                  </View>
+                  <View style={styles.aiMessageContainer}>
+                    <Text style={styles.aiMessageLabel}>[Lời giải thích của Giáo viên AI]:</Text>
+                    <Text style={styles.aiMessageText}>{aiExplanation}</Text>
+                  </View>
+                </View>
+              )}
+            </ScrollView>
+            
+            <TouchableOpacity 
+              style={styles.modalCloseButton}
+              onPress={() => setAiModalVisible(false)}
+            >
+              <Text style={styles.modalCloseButtonText}>Đóng</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -326,5 +460,100 @@ const styles = StyleSheet.create({
     color: COLORS.onSurfaceVariant,
     lineHeight: 20,
     fontStyle: 'italic',
+  },
+
+  aiButton: {
+    backgroundColor: '#3b82f6',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+    shadowColor: '#3b82f6',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  aiButtonText: {
+    color: '#ffffff',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalContent: {
+    backgroundColor: COLORS.surfaceContainerLowest,
+    borderRadius: 20,
+    width: '100%',
+    maxHeight: '80%',
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.1,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  modalTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: COLORS.onSurface,
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  modalScroll: {
+    maxHeight: 400,
+  },
+  aiChatBubble: {
+    flexDirection: 'row',
+    backgroundColor: '#f0f9ff',
+    padding: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#bae6fd',
+    gap: 12,
+  },
+  aiAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#ffffff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 1,
+  },
+  aiMessageContainer: {
+    flex: 1,
+  },
+  aiMessageLabel: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#0369a1',
+    marginBottom: 4,
+  },
+  aiMessageText: {
+    fontSize: 14,
+    color: '#0f172a',
+    lineHeight: 22,
+  },
+  modalCloseButton: {
+    marginTop: 20,
+    paddingVertical: 12,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: COLORS.outlineVariant,
+    alignItems: 'center',
+  },
+  modalCloseButtonText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.onSurfaceVariant,
   }
 });

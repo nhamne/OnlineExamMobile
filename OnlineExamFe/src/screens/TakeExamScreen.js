@@ -122,10 +122,11 @@ const TakeExamScreen = ({ navigation, route }) => {
     ]);
   }, [handleFinalSubmit]);
 
-  const handleSelectOption = async (questionId, optionId) => {
-    dispatch(updateAnswer({ questionId, optionId }));
+  const handleSelectOption = async (question, displayOptionId) => {
+    const originalOptionId = question.displayToOriginal?.[displayOptionId] || displayOptionId;
+    dispatch(updateAnswer({ questionId: question.id, optionId: displayOptionId }));
     try {
-      await examApi.saveAnswer(currentAttempt.id, questionId, optionId);
+      await examApi.saveAnswer(currentAttempt.id, question.id, originalOptionId);
     } catch (error) {
       console.warn('Autosave failed:', error);
     }
@@ -233,7 +234,7 @@ const TakeExamScreen = ({ navigation, route }) => {
               styles.optionItem,
               answers[currentQuestion.id] === opt && styles.optionSelected,
             ]}
-            onPress={() => handleSelectOption(currentQuestion.id, opt)}
+            onPress={() => handleSelectOption(currentQuestion, opt)}
           >
             <View style={[
               styles.optionRadio,
@@ -241,7 +242,7 @@ const TakeExamScreen = ({ navigation, route }) => {
             ]}>
               {answers[currentQuestion.id] === opt && <View style={styles.optionRadioInner} />}
             </View>
-            <Text style={styles.optionText}>{currentQuestion[`option${opt}`]}</Text>
+            <Text style={styles.optionText}>{currentQuestion.displayAnswerMap?.[opt]}</Text>
           </TouchableOpacity>
         ))}
       </ScrollView>

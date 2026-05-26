@@ -1,6 +1,31 @@
 import { createSlice } from '@reduxjs/toolkit';
 import { getSeededRandom, seededShuffleArray } from '../utils/shuffle';
 
+function buildDisplayAnswerMap(question, randomFunc, shouldShuffleAnswers) {
+  const baseAnswers = [
+    { originalKey: 'A', text: question.optionA },
+    { originalKey: 'B', text: question.optionB },
+    { originalKey: 'C', text: question.optionC },
+    { originalKey: 'D', text: question.optionD },
+  ];
+  const orderedAnswers = shouldShuffleAnswers ? seededShuffleArray(baseAnswers, randomFunc) : baseAnswers;
+  const displaySlots = ['A', 'B', 'C', 'D'];
+  const displayAnswerMap = {};
+  const displayToOriginal = {};
+
+  orderedAnswers.forEach((answer, index) => {
+    const displayKey = displaySlots[index];
+    displayAnswerMap[displayKey] = answer.text;
+    displayToOriginal[displayKey] = answer.originalKey;
+  });
+
+  return {
+    displaySlots,
+    displayAnswerMap,
+    displayToOriginal,
+  };
+}
+
 const examSlice = createSlice({
   name: 'exam',
   initialState: {
@@ -26,14 +51,10 @@ const examSlice = createSlice({
         pool = seededShuffleArray(pool, randomFunc);
       }
 
-      state.snapshotQuestions = pool.map((q) => {
-        const baseSlots = ['A', 'B', 'C', 'D'];
-        const slots = shouldShuffleAnswers ? seededShuffleArray(baseSlots, randomFunc) : baseSlots;
-        return {
-          ...q,
-          displaySlots: slots,
-        };
-      });
+      state.snapshotQuestions = pool.map((q) => ({
+        ...q,
+        ...buildDisplayAnswerMap(q, randomFunc, shouldShuffleAnswers),
+      }));
 
       const resolvedDuration = Number(
         duration
