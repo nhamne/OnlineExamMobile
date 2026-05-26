@@ -5,16 +5,19 @@ import {
   RefreshControl,
   ScrollView,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
-import { getStudentDashboard } from '../../services/authService';
+import { getStudentDashboard, joinClassroom } from '../../services/authService';
 import BottomSidebarNav from '../../components/BottomSidebarNav';
 import DashboardTopBar from '../../components/DashboardTopBar';
 import { useToast } from '../../context/ToastContext';
 import { clearAuthSession } from '../../services/authSession';
+import examApi from '../../api/exam.api';
+import { useExamStore } from '../../store/useExamStore';
 
 const studentMenuItems = [
   { key: 'home', label: 'Trang chủ', shortLabel: 'Trang chủ', icon: 'home' },
@@ -43,8 +46,8 @@ const StatCard = ({ icon, label, value, tone = 'default' }) => {
   );
 };
 
-const SessionCard = ({ item }) => (
-  <View className="bg-surface-container-lowest rounded-2xl p-4 mb-3" style={{ borderWidth: 1, borderColor: '#c1c6d640' }}>
+const SessionCard = ({ item, onPress }) => (
+  <TouchableOpacity onPress={() => onPress(item)} className="bg-surface-container-lowest rounded-2xl p-4 mb-3" style={{ borderWidth: 1, borderColor: '#c1c6d640' }}>
     <View className="flex-row items-center justify-between">
       <Text className="font-extrabold text-on-surface flex-1 pr-3">{item.SessionName}</Text>
       <View className="bg-blue-50 px-2 py-1 rounded-lg">
@@ -53,12 +56,13 @@ const SessionCard = ({ item }) => (
     </View>
     <Text className="text-sm text-on-surface-variant mt-2">Lớp: {item.ClassName}</Text>
     <Text className="text-sm text-on-surface-variant">Bài thi: {item.ExamTitle}</Text>
-  </View>
+  </TouchableOpacity>
 );
 
 const StudentDashboardScreen = ({ route, navigation }) => {
   const user = route.params?.user;
   const { showToast } = useToast();
+  const startExam = useExamStore((state) => state.startExam);
   const [summary, setSummary] = useState(null);
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -66,6 +70,8 @@ const StudentDashboardScreen = ({ route, navigation }) => {
   const [error, setError] = useState('');
   const [activeMenu, setActiveMenu] = useState('home');
   const [searchText, setSearchText] = useState('');
+  const [joinCode, setJoinCode] = useState('');
+  const [joining, setJoining] = useState(false);
 
   const initials = useMemo(() => {
     const fullName = user?.fullName || '';
@@ -114,6 +120,36 @@ const StudentDashboardScreen = ({ route, navigation }) => {
     navigation.replace('Login');
   };
 
+  const handleJoinClass = async () => {
+    if (!joinCode.trim()) {
+      showToast('Vui lòng nhập mã lớp.', 'error');
+      return;
+    }
+    try {
+      setJoining(true);
+      const res = await joinClassroom(user?.id, joinCode);
+      showToast(res.message || 'Tham gia lớp thành công!', 'success');
+      setJoinCode('');
+      onRefresh(); // Tải lại dashboard để cập nhật lớp học và ca thi
+    } catch (err) {
+      showToast(err?.response?.data?.message || 'Có lỗi xảy ra khi tham gia lớp.', 'error');
+    } finally {
+      setJoining(false);
+    }
+  };
+
+  const onSessionPress = async (item) => {
+    try {
+      showToast('Đang chuẩn bị đề thi...', 'info');
+      const res = await examApi.startAttempt(item.Id, { studentId: user?.id });
+      startExam(res.data.attemptData, res.data.questions);
+      navigation.navigate('TakeExam');
+    } catch (error) {
+      console.error(error);
+      showToast(error?.response?.data?.message || 'Không thể bắt đầu ca thi.', 'error');
+    }
+  };
+
   const filterKeyword = searchText.trim().toLowerCase();
   const filteredSessions = useMemo(
     () =>
@@ -154,7 +190,7 @@ const StudentDashboardScreen = ({ route, navigation }) => {
       </View>
 
       {filteredSessions.slice(0, 4).map((item) => (
-        <SessionCard key={String(item.Id)} item={item} />
+        <SessionCard key={String(item.Id)} item={item} onPress={onSessionPress} />
       ))}
 
       {filteredSessions.length === 0 ? (
@@ -171,11 +207,31 @@ const StudentDashboardScreen = ({ route, navigation }) => {
       <Text className="text-on-surface-variant mb-4 leading-6">
         Nhập mã lớp do giáo viên cung cấp để tham gia lớp, nhận lịch thi và theo dõi kết quả học tập.
       </Text>
+      
+      <View className="flex-row items-center bg-surface-container-highest rounded-xl px-4 h-14 border mb-4" style={{ borderColor: '#c1c6d680' }}>
+        <MaterialIcons name="vpn-key" size={20} color="#727785" />
+        <TextInput
+          className="flex-1 ml-3 text-on-surface font-body text-base"
+          placeholder="Nhập mã lớp (VD: ABCXYZ)"
+          placeholderTextColor="#727785"
+          autoCapitalize="characters"
+          autoCorrect={false}
+          value={joinCode}
+          onChangeText={setJoinCode}
+          editable={!joining}
+        />
+      </View>
+
       <TouchableOpacity
-        className="bg-primary rounded-xl h-12 items-center justify-center"
-        onPress={() => showToast('Tính năng nhập mã lớp sẽ được cập nhật tiếp theo.', 'info')}
+        className="bg-primary rounded-xl h-12 items-center justify-center flex-row"
+        onPress={handleJoinClass}
+        disabled={joining}
       >
-        <Text className="text-white font-bold text-base">Nhập mã lớp</Text>
+        {joining ? (
+          <ActivityIndicator color="#ffffff" />
+        ) : (
+          <Text className="text-white font-bold text-base">Tham gia lớp</Text>
+        )}
       </TouchableOpacity>
     </View>
   );
@@ -184,7 +240,7 @@ const StudentDashboardScreen = ({ route, navigation }) => {
     <>
       <Text className="text-xl font-black text-on-surface mb-3">Danh sách ca thi</Text>
       {filteredSessions.length > 0 ? (
-        filteredSessions.map((item) => <SessionCard key={String(item.Id)} item={item} />)
+        filteredSessions.map((item) => <SessionCard key={String(item.Id)} item={item} onPress={onSessionPress} />)
       ) : (
         <View className="bg-surface-container-lowest rounded-2xl p-6 items-center" style={{ borderWidth: 1, borderColor: '#c1c6d633' }}>
           <Text className="text-on-surface-variant">Hiện chưa có ca thi nào được phân công.</Text>

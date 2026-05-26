@@ -4,7 +4,18 @@ const fs = require('fs/promises');
 const path = require('path');
 const bcrypt = require('bcryptjs');
 const sql = require('mssql');
+const nodemailer = require('nodemailer');
 require('dotenv').config();
+
+const otpCache = new Map();
+
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.EMAIL_USER, // Need to set in .env
+    pass: process.env.EMAIL_PASS, // Need to set in .env (App Password)
+  },
+});
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
@@ -340,6 +351,106 @@ app.post('/api/auth/login', async (req, res) => {
       message: 'Login success',
       user: sanitizeUser(user),
     });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+app.post('/api/auth/forgot-password/send-otp', async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ message: 'Vui lòng cung cấp email.' });
+    }
+
+    const pool = await getPool();
+    const result = await pool
+      .request()
+      .input('email', sql.VarChar(255), String(email).trim().toLowerCase())
+      .query('SELECT TOP 1 Id, FullName FROM Users WHERE Email = @email');
+
+    if (result.recordset.length === 0) {
+      return res.status(404).json({ message: 'Không tìm thấy tài khoản với email này.' });
+    }
+
+    // Generate 6 digit OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = Date.now() + 5 * 60 * 1000; // 5 mins
+
+    otpCache.set(email, { otp, expiresAt });
+
+    const mailOptions = {
+      from: process.env.EMAIL_USER || 'Online Exam',
+      to: email,
+      subject: 'Mã xác nhận quên mật khẩu',
+      text: `Chào ${result.recordset[0].FullName},\n\nMã xác nhận (OTP) của bạn là: ${otp}\n\nMã này có hiệu lực trong vòng 5 phút. Vui lòng không chia sẻ mã này cho bất kỳ ai.\n\nTrân trọng.`,
+    };
+
+    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+      // If email is not configured, we print it to console to allow them to test
+      console.log(`[DEV MODE] Gửi mã OTP tới ${email}: ${otp}`);
+      return res.json({ message: 'Mã OTP đã được tạo. Vui lòng kiểm tra email (hoặc console nếu chưa cấu hình email).' });
+    }
+
+    await transporter.sendMail(mailOptions);
+
+    return res.json({ message: 'Mã OTP đã được gửi đến email của bạn.' });
+  } catch (error) {
+    console.error('Send OTP Error:', error);
+    return res.status(500).json({ message: 'Có lỗi khi gửi email. Vui lòng kiểm tra lại cấu hình.' });
+  }
+});
+
+app.post('/api/auth/reset-password', async (req, res) => {
+  try {
+    const { email, otp, newPassword } = req.body;
+
+    if (!email || !otp || !newPassword) {
+      return res.status(400).json({ message: 'Email, mã OTP và mật khẩu mới là bắt buộc.' });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({ message: 'Mật khẩu phải chứa ít nhất 6 ký tự.' });
+    }
+
+    const cached = otpCache.get(email);
+    if (!cached) {
+      return res.status(400).json({ message: 'Mã OTP không hợp lệ hoặc đã hết hạn.' });
+    }
+
+    if (Date.now() > cached.expiresAt) {
+      otpCache.delete(email);
+      return res.status(400).json({ message: 'Mã OTP đã hết hạn.' });
+    }
+
+    if (cached.otp !== String(otp).trim()) {
+      return res.status(400).json({ message: 'Mã OTP không chính xác.' });
+    }
+
+    const pool = await getPool();
+
+    const result = await pool
+      .request()
+      .input('email', sql.VarChar(255), String(email).trim().toLowerCase())
+      .query('SELECT TOP 1 Id FROM Users WHERE Email = @email');
+
+    if (result.recordset.length === 0) {
+      return res.status(404).json({ message: 'Không tìm thấy tài khoản với email này.' });
+    }
+
+    const userId = result.recordset[0].Id;
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+
+    await pool
+      .request()
+      .input('userId', sql.Int, userId)
+      .input('passwordHash', sql.VarChar(255), passwordHash)
+      .query('UPDATE Users SET PasswordHash = @passwordHash WHERE Id = @userId');
+
+    // Remove OTP after success
+    otpCache.delete(email);
+
+    return res.json({ message: 'Đổi mật khẩu thành công.' });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
@@ -1540,6 +1651,41 @@ app.post('/api/dashboard/teacher/:userId/sessions', async (req, res) => {
       joinCode: sessionDetail.JoinCode,
     });
 
+    // Notify students via email
+    try {
+      const studentsResult = await pool
+        .request()
+        .input('classroomId', sql.Int, classroomId)
+        .query(`
+          SELECT u.Email, u.FullName 
+          FROM ClassroomMembers cm
+          INNER JOIN Users u ON u.Id = cm.StudentId
+          WHERE cm.ClassroomId = @classroomId AND u.Role = 'Student'
+        `);
+
+      const students = studentsResult.recordset;
+      
+      if (students.length > 0 && process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+        const formattedStartTime = new Date(startDate).toLocaleString('vi-VN', { hour12: false });
+        const formattedEndTime = new Date(endDate).toLocaleString('vi-VN', { hour12: false });
+        
+        for (const student of students) {
+          const mailOptions = {
+            from: process.env.EMAIL_USER || 'Online Exam',
+            to: student.Email,
+            subject: `[Thông báo] Bài thi mới: ${sessionName}`,
+            text: `Chào ${student.FullName},\n\nGiáo viên vừa tạo một ca thi mới cho lớp học của bạn.\n\nThông tin ca thi:\n- Tên ca thi: ${sessionName}\n- Thời gian bắt đầu: ${formattedStartTime}\n- Thời gian kết thúc: ${formattedEndTime}\n- Thời lượng: ${durationInMinutes} phút\n\nVui lòng đăng nhập vào ứng dụng đúng giờ để tham gia thi.\n\nTrân trọng.`,
+          };
+          
+          transporter.sendMail(mailOptions).catch(err => console.error('Lỗi gửi email cho học sinh:', err));
+        }
+      } else if (students.length > 0) {
+         console.log(`[DEV MODE] Gửi thông báo bài thi mới tới ${students.length} học sinh (chưa cấu hình email).`);
+      }
+    } catch (notifyError) {
+      console.error('Lỗi khi lấy danh sách học sinh để gửi email:', notifyError);
+    }
+
     return res.status(201).json({
       message: 'Tạo ca thi thành công.',
       session: {
@@ -1874,6 +2020,80 @@ app.delete('/api/dashboard/teacher/:userId/sessions/:sessionId', async (req, res
   }
 });
 
+// Học sinh tham gia lớp học bằng mã lớp (JoinCode)
+app.post('/api/dashboard/student/:userId/classrooms/join', async (req, res) => {
+  try {
+    const userId = Number(req.params.userId);
+    const joinCode = String(req.body?.joinCode || '').trim().toUpperCase();
+
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({ message: 'Invalid userId.' });
+    }
+
+    if (!joinCode) {
+      return res.status(400).json({ message: 'Vui lòng nhập mã lớp học.' });
+    }
+
+    const pool = await getPool();
+
+    // Check student role
+    const studentCheck = await pool
+      .request()
+      .input('studentId', sql.Int, userId)
+      .query(`
+        SELECT TOP 1 Id FROM Users WHERE Id = @studentId AND Role = 'Student'
+      `);
+
+    if (studentCheck.recordset.length === 0) {
+      return res.status(404).json({ message: 'Không tìm thấy học sinh.' });
+    }
+
+    // Find classroom by joinCode
+    const classroomResult = await pool
+      .request()
+      .input('joinCode', sql.VarChar(50), joinCode)
+      .query(`
+        SELECT TOP 1 Id, ClassName FROM Classrooms
+        WHERE UPPER(JoinCode) = @joinCode AND IsDeleted = 0
+      `);
+
+    if (classroomResult.recordset.length === 0) {
+      return res.status(404).json({ message: 'Mã lớp không hợp lệ hoặc lớp đã bị xóa.' });
+    }
+
+    const classroomId = classroomResult.recordset[0].Id;
+    const className = classroomResult.recordset[0].ClassName;
+
+    // Check if already joined
+    const memberCheck = await pool
+      .request()
+      .input('classroomId', sql.Int, classroomId)
+      .input('studentId', sql.Int, userId)
+      .query(`
+        SELECT TOP 1 Id FROM ClassroomMembers
+        WHERE ClassroomId = @classroomId AND StudentId = @studentId
+      `);
+
+    if (memberCheck.recordset.length > 0) {
+      return res.status(400).json({ message: `Bạn đã tham gia lớp "${className}" rồi.` });
+    }
+
+    // Join classroom
+    await pool
+      .request()
+      .input('classroomId', sql.Int, classroomId)
+      .input('studentId', sql.Int, userId)
+      .query(`
+        INSERT INTO ClassroomMembers (ClassroomId, StudentId)
+        VALUES (@classroomId, @studentId)
+      `);
+
+    return res.status(201).json({ message: `Tham gia lớp "${className}" thành công.` });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
 app.get('/api/dashboard/student/:userId', async (req, res) => {
   try {
     const userId = Number(req.params.userId);
@@ -2037,6 +2257,211 @@ app.get('/api/public/sessions/access', async (req, res) => {
       canAccess: !isUpcoming && !isClosed,
       status,
       session,
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+// Bắt đầu làm bài thi (Tạo submission và lấy câu hỏi)
+app.post('/api/student/exams/:examSessionId/start', async (req, res) => {
+  try {
+    const examSessionId = Number(req.params.examSessionId);
+    const { studentId } = req.body;
+
+    if (!Number.isInteger(examSessionId) || examSessionId <= 0) {
+      return res.status(400).json({ message: 'Mã ca thi không hợp lệ.' });
+    }
+    if (!Number.isInteger(studentId) || studentId <= 0) {
+      return res.status(400).json({ message: 'Vui lòng cung cấp studentId.' });
+    }
+
+    const pool = await getPool();
+
+    const sessionCheck = await pool
+      .request()
+      .input('examSessionId', sql.Int, examSessionId)
+      .query(`
+        SELECT Id, ExamPaperId, StartTime, EndTime, DurationInMinutes 
+        FROM ExamSessions 
+        WHERE Id = @examSessionId AND IsDeleted = 0
+      `);
+
+    if (sessionCheck.recordset.length === 0) {
+      return res.status(404).json({ message: 'Ca thi không tồn tại hoặc đã bị xóa.' });
+    }
+
+    const session = sessionCheck.recordset[0];
+    const now = new Date();
+    
+    if (now < new Date(session.StartTime)) {
+      return res.status(400).json({ message: 'Ca thi chưa bắt đầu.' });
+    }
+    if (now > new Date(session.EndTime)) {
+      return res.status(400).json({ message: 'Ca thi đã kết thúc.' });
+    }
+
+    // Check if submission already exists
+    let submissionCheck = await pool
+      .request()
+      .input('examSessionId', sql.Int, examSessionId)
+      .input('studentId', sql.Int, studentId)
+      .query(`
+        SELECT Id, Status, StartedAt, SubmittedAt
+        FROM Submissions
+        WHERE ExamSessionId = @examSessionId AND StudentId = @studentId
+      `);
+
+    let submissionId;
+    if (submissionCheck.recordset.length > 0) {
+      const sub = submissionCheck.recordset[0];
+      if (sub.Status !== 0) {
+        return res.status(400).json({ message: 'Bạn đã hoàn thành bài thi này rồi.' });
+      }
+      submissionId = sub.Id;
+    } else {
+      // Create new submission
+      const newSub = await pool
+        .request()
+        .input('examSessionId', sql.Int, examSessionId)
+        .input('studentId', sql.Int, studentId)
+        .query(`
+          INSERT INTO Submissions (ExamSessionId, StudentId, StartedAt, Status)
+          OUTPUT INSERTED.Id
+          VALUES (@examSessionId, @studentId, GETDATE(), 0)
+        `);
+      submissionId = newSub.recordset[0].Id;
+    }
+
+    // Lấy câu hỏi
+    const questionsResult = await pool
+      .request()
+      .input('examPaperId', sql.Int, session.ExamPaperId)
+      .query(`
+        SELECT Id, Content, OptionA, OptionB, OptionC, OptionD
+        FROM Questions
+        WHERE ExamPaperId = @examPaperId
+      `);
+
+    // Format lại dữ liệu cho frontend
+    const formattedQuestions = questionsResult.recordset.map(q => ({
+      id: q.Id,
+      content: q.Content,
+      options: [
+        { id: 'A', content: q.OptionA },
+        { id: 'B', content: q.OptionB },
+        { id: 'C', content: q.OptionC },
+        { id: 'D', content: q.OptionD }
+      ].filter(o => o.content)
+    }));
+
+    return res.json({
+      attemptData: {
+        id: submissionId,
+        examSessionId: session.Id,
+        remainingSeconds: session.DurationInMinutes * 60,
+        violationCount: 0,
+        maxViolations: 3
+      },
+      questions: formattedQuestions
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+// Nộp bài thi và tính điểm, sau đó gửi email
+app.post('/api/student/attempts/:attemptId/submit', async (req, res) => {
+  try {
+    const attemptId = Number(req.params.attemptId);
+    const { answers } = req.body; // answers là object { questionId: optionId }
+
+    if (!Number.isInteger(attemptId) || attemptId <= 0) {
+      return res.status(400).json({ message: 'Mã bài thi không hợp lệ.' });
+    }
+
+    const pool = await getPool();
+
+    // Lấy thông tin bài thi và email học sinh
+    const submissionResult = await pool
+      .request()
+      .input('attemptId', sql.Int, attemptId)
+      .query(`
+        SELECT s.Id, s.StudentId, s.ExamSessionId, u.Email, u.FullName, es.ExamPaperId, es.SessionName
+        FROM Submissions s
+        INNER JOIN Users u ON u.Id = s.StudentId
+        INNER JOIN ExamSessions es ON es.Id = s.ExamSessionId
+        WHERE s.Id = @attemptId AND s.Status = 0
+      `);
+
+    if (submissionResult.recordset.length === 0) {
+      return res.status(404).json({ message: 'Không tìm thấy bài thi đang làm hoặc đã nộp.' });
+    }
+
+    const submission = submissionResult.recordset[0];
+
+    // Tính điểm dựa trên bảng Questions
+    const questionsResult = await pool
+      .request()
+      .input('examPaperId', sql.Int, submission.ExamPaperId)
+      .query('SELECT Id, CorrectOption FROM Questions WHERE ExamPaperId = @examPaperId');
+    
+    const questions = questionsResult.recordset;
+    let correctCount = 0;
+
+    // Lưu SubmissionDetails và đếm số câu đúng
+    for (const q of questions) {
+      const selectedOption = answers && answers[q.Id] ? String(answers[q.Id]) : null;
+      const isCorrect = selectedOption === q.CorrectOption ? 1 : 0;
+      
+      if (isCorrect) correctCount++;
+
+      await pool
+        .request()
+        .input('submissionId', sql.Int, attemptId)
+        .input('questionId', sql.Int, q.Id)
+        .input('selectedOption', sql.Char(1), selectedOption)
+        .input('isCorrect', sql.Bit, isCorrect)
+        .query(`
+          INSERT INTO SubmissionDetails (SubmissionId, QuestionId, SelectedOption, IsCorrect)
+          VALUES (@submissionId, @questionId, @selectedOption, @isCorrect)
+        `);
+    }
+
+    const totalQuestions = questions.length;
+    const score = totalQuestions > 0 ? (correctCount / totalQuestions) * 10 : 0;
+    const roundedScore = Math.round(score * 100) / 100;
+
+    // Cập nhật Submissions
+    await pool
+      .request()
+      .input('attemptId', sql.Int, attemptId)
+      .input('score', sql.Float, roundedScore)
+      .input('correctCount', sql.Int, correctCount)
+      .query(`
+        UPDATE Submissions 
+        SET Status = 1, SubmittedAt = GETDATE(), Score = @score, CorrectAnswersCount = @correctCount
+        WHERE Id = @attemptId
+      `);
+
+    // Gửi email thông báo điểm
+    if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+      const mailOptions = {
+        from: process.env.EMAIL_USER || 'Online Exam',
+        to: submission.Email,
+        subject: `[Kết quả thi] ${submission.SessionName}`,
+        text: `Chào ${submission.FullName},\n\nBạn đã nộp bài thi thành công.\n\nKết quả bài thi "${submission.SessionName}":\n- Số câu đúng: ${correctCount} / ${totalQuestions}\n- Điểm số: ${roundedScore} / 10\n\nBạn có thể đăng nhập vào ứng dụng để xem chi tiết bài làm.\n\nTrân trọng.`,
+      };
+      transporter.sendMail(mailOptions).catch(err => console.error('Lỗi gửi email điểm thi:', err));
+    } else {
+      console.log(`[DEV MODE] Báo điểm cho ${submission.Email}: Điểm ${roundedScore}`);
+    }
+
+    return res.json({
+      message: 'Nộp bài thành công',
+      id: attemptId,
+      score: roundedScore,
+      correctCount
     });
   } catch (error) {
     return res.status(500).json({ message: error.message });

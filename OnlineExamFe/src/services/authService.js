@@ -16,6 +16,16 @@ export async function login(payload) {
   return response.data;
 }
 
+export async function resetPassword(payload) {
+  const response = await api.post('/api/auth/reset-password', payload);
+  return response.data;
+}
+
+export async function sendOtp(payload) {
+  const response = await api.post('/api/auth/forgot-password/send-otp', payload);
+  return response.data;
+}
+
 export async function getExams() {
   const response = await api.get('/api/exams');
   return response.data;
@@ -141,5 +151,10 @@ export async function removeStudentFromTeacherClassroom(userId, classroomId, stu
 
 export async function getStudentDashboard(userId) {
   const response = await api.get(`/api/dashboard/student/${userId}`);
+  return response.data;
+}
+
+export async function joinClassroom(userId, joinCode) {
+  const response = await api.post(`/api/dashboard/student/${userId}/classrooms/join`, { joinCode });
   return response.data;
 }

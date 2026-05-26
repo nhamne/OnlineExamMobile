@@ -3,6 +3,7 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import LoginScreen from '../screens/auth/LoginScreen';
 import RegisterScreen from '../screens/auth/RegisterScreen';
+import ForgotPasswordScreen from '../screens/auth/ForgotPasswordScreen';
 import TeacherDashboardScreen from '../screens/dashboard/TeacherDashboardScreen';
 import TeacherProfileScreen from '../screens/teacher/TeacherProfileScreen';
 import StudentDashboardScreen from '../screens/dashboard/StudentDashboardScreen';
@@ -10,6 +11,7 @@ import ClassScreen from '../screens/teacher/ClassScreen';
 import ClassroomManagementScreen from '../screens/teacher/ClassroomManagementScreen';
 import SessionScreen from '../screens/teacher/SessionScreen';
 import SessionManagementScreen from '../screens/teacher/SessionManagementScreen';
+import TakeExamScreen from '../screens/TakeExamScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -25,6 +27,7 @@ const AppNavigator = ({ initialRouteName = 'Login', initialUser = null }) => {
 			>
 				<Stack.Screen name="Login" component={LoginScreen} />
 				<Stack.Screen name="Register" component={RegisterScreen} />
+				<Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
 				<Stack.Screen
 					name="TeacherDashboard"
 					component={TeacherDashboardScreen}
@@ -59,6 +62,11 @@ const AppNavigator = ({ initialRouteName = 'Login', initialUser = null }) => {
 					name="StudentDashboard"
 					component={StudentDashboardScreen}
 					initialParams={{ user: initialUser }}
+				/>
+				<Stack.Screen
+					name="TakeExam"
+					component={TakeExamScreen}
+					options={{ gestureEnabled: false }}
 				/>
 			</Stack.Navigator>
 		</NavigationContainer>

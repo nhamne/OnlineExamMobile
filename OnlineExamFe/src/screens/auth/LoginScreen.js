@@ -107,6 +107,7 @@ const LoginScreen = ({ navigation }) => {
         showToast('Role tài khoản không hợp lệ trong cơ sở dữ liệu.', 'error');
       }
     } catch (error) {
+      console.error('Login error:', error);
       showToast(error?.response?.data?.message || 'Không thể kết nối đến máy chủ.', 'error');
     } finally {
       setLoading(false);
@@ -212,7 +213,7 @@ const LoginScreen = ({ navigation }) => {
                   Ghi nhớ đăng nhập
                 </Text>
               </TouchableOpacity>
-              <TouchableOpacity>
+              <TouchableOpacity onPress={() => navigation.navigate('ForgotPassword')}>
                 <Text className="text-sm font-bold text-primary">Quên mật khẩu?</Text>
               </TouchableOpacity>
             </View>
