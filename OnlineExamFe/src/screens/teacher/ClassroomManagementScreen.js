@@ -8,14 +8,29 @@ import {
   Text,
   TouchableOpacity,
   View,
+  Platform,
+  StyleSheet,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
-import TeacherScreenShell from '../../components/TeacherScreenShell';
 import { useToast } from '../../context/ToastContext';
 import {
   getTeacherClassroomDetail,
   removeStudentFromTeacherClassroom,
 } from '../../services/authService';
+
+const COLORS = {
+  primary: '#005BBF',
+  primaryContainer: '#004aad',
+  surface: '#f7f9fb',
+  surfaceContainerLow: '#f2f4f6',
+  surfaceContainerLowest: '#ffffff',
+  onSurface: '#191c1e',
+  onSurfaceVariant: '#434653',
+  outlineVariant: 'rgba(195, 198, 213, 0.4)',
+  errorContainer: '#ffdad6',
+  onErrorContainer: '#410002',
+};
 
 const ClassroomManagementScreen = ({ route, navigation }) => {
   const { showToast } = useToast();
@@ -32,7 +47,7 @@ const ClassroomManagementScreen = ({ route, navigation }) => {
   const [showRemoveModal, setShowRemoveModal] = useState(false);
   const [selectedStudent, setSelectedStudent] = useState(null);
 
-  const classroomId = classroomParam?.Id || classroomParam?.id || null;
+  const classroomId = classroomParam?.Id || classroomParam?.id || route?.params?.classroomId || null;
 
   const teacherInitials = useMemo(() => {
     const fullName = user?.fullName || '';
@@ -120,137 +135,120 @@ const ClassroomManagementScreen = ({ route, navigation }) => {
     }
   };
 
-  const onSelectBottomNav = (item) => {
-    if (item.key === 'classes') {
-      navigation.replace('TeacherClassrooms', { user });
-      return;
-    }
-
-    if (item.key === 'sessions') {
-      navigation.replace('TeacherSessions', { user });
-      return;
-    }
-
-    navigation.replace('TeacherDashboard', {
-      user,
-      initialTab: item.key,
-    });
-  };
-
   return (
-    <TeacherScreenShell
-      bottomNavItems={[
-        { key: 'home', label: 'Tổng quan', shortLabel: 'Home', icon: 'home' },
-        { key: 'classes', label: 'Lớp học', shortLabel: 'Classes', icon: 'groups' },
-        { key: 'exams', label: 'Đề thi', shortLabel: 'Exams', icon: 'description' },
-        { key: 'sessions', label: 'Ca thi', shortLabel: 'Sessions', icon: 'event' },
-        { key: 'reports', label: 'Báo cáo', shortLabel: 'Reports', icon: 'bar-chart' },
-      ]}
-      activeKey="classes"
-      onSelectBottomNav={onSelectBottomNav}
-      searchText={searchText}
-      onChangeSearch={setSearchText}
-      searchPlaceholder="Tìm kiếm học sinh theo tên hoặc email..."
-      upcomingCount={0}
-      initials={teacherInitials}
-      onPressAvatar={() => navigation.replace('TeacherDashboard', { user, initialTab: 'profile' })}
-    >
+    <SafeAreaView style={styles.container}>
+      <View style={styles.header}>
+        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+          <MaterialIcons name="arrow-back" size={20} color={COLORS.primary} />
+        </TouchableOpacity>
+        <View style={styles.headerTitleContainer}>
+          <Text style={styles.headerTitle}>Chi tiết lớp học</Text>
+          <Text style={styles.headerSubtitle}>Quản lý học sinh</Text>
+        </View>
+      </View>
+
       <ScrollView
-        className="flex-1 px-4"
-        style={{ minHeight: 0 }}
+        contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-        contentContainerStyle={{ paddingBottom: 28 }}
       >
-        <TouchableOpacity
-          onPress={() => navigation.goBack()}
-          className="mt-4 mb-3 flex-row items-center self-start px-3 py-2 rounded-xl bg-surface-container-high"
-        >
-          <MaterialIcons name="arrow-back" size={16} color="#0B63C8" />
-          <Text className="text-primary font-bold ml-1">Quay lại</Text>
-        </TouchableOpacity>
 
-        <View className="bg-surface-container-lowest rounded-3xl p-5 mb-4" style={{ borderWidth: 1, borderColor: '#c1c6d64d' }}>
-          <Text className="text-xs uppercase tracking-wide font-bold text-on-surface-variant mb-2">
-            Thông tin lớp học
-          </Text>
-          <Text className="text-2xl font-bold text-on-surface">{classroom?.ClassName || '--'}</Text>
-
-          <View className="mt-3 flex-row items-center justify-between">
-            <View className="flex-row items-center">
-              <MaterialIcons name="vpn-key" size={18} color="#1F2937" />
-              <Text className="text-on-surface ml-2 font-semibold">Mã: {classroom?.JoinCode || '--'}</Text>
+        <View style={styles.infoSection}>
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>Tên lớp học</Text>
+            <View style={styles.infoInputBlock}>
+              <Text style={styles.infoInputText}>{classroom?.ClassName || '--'}</Text>
             </View>
-            <View className="flex-row items-center">
-              <MaterialIcons name="people-outline" size={18} color="#1F2937" />
-              <Text className="text-on-surface ml-2 font-semibold">
-                {classroom?.StudentCount ?? students.length} học sinh
+          </View>
+
+          <View style={{ flexDirection: 'row', gap: 12 }}>
+            <View style={[styles.infoRow, { flex: 1 }]}>
+              <Text style={styles.infoLabel}>Mã tham gia</Text>
+              <View style={[styles.infoInputBlock, { flexDirection: 'row', alignItems: 'center', gap: 8 }]}>
+                <MaterialIcons name="vpn-key" size={16} color={COLORS.primary} />
+                <Text style={[styles.infoInputText, { color: COLORS.primary, fontWeight: '700' }]}>
+                  {classroom?.JoinCode || '--'}
+                </Text>
+              </View>
+            </View>
+
+            <View style={[styles.infoRow, { flex: 1 }]}>
+              <Text style={styles.infoLabel}>Sĩ số</Text>
+              <View style={[styles.infoInputBlock, { flexDirection: 'row', alignItems: 'center', gap: 8 }]}>
+                <MaterialIcons name="people" size={16} color={COLORS.onSurfaceVariant} />
+                <Text style={styles.infoInputText}>
+                  {classroom?.StudentCount ?? students.length} học sinh
+                </Text>
+              </View>
+            </View>
+          </View>
+        </View>
+
+        <View style={styles.listHeaderRow}>
+          <Text style={styles.listTitle}>Danh sách học sinh</Text>
+          <Text style={styles.listCount}>Tổng: {students.length}</Text>
+        </View>
+
+        <View style={styles.listSection}>
+          {loading ? (
+            <View style={styles.loadingBox}>
+              <ActivityIndicator size="large" color={COLORS.primary} />
+              <Text style={styles.loadingText}>Đang tải danh sách học sinh...</Text>
+            </View>
+          ) : error ? (
+            <View style={styles.errorBox}>
+              <Text style={styles.errorText}>{error}</Text>
+            </View>
+          ) : students.length === 0 ? (
+            <View style={styles.emptyState}>
+              <MaterialIcons name="person-off" size={40} color="#727785" />
+              <Text style={styles.emptyStateText}>Lớp hiện chưa có học sinh.</Text>
+            </View>
+          ) : filteredStudents.length === 0 ? (
+            <View style={styles.emptyState}>
+              <MaterialIcons name="search-off" size={40} color="#727785" />
+              <Text style={styles.emptyStateText}>
+                Không tìm thấy học sinh theo tên hoặc email.
               </Text>
             </View>
-          </View>
-        </View>
+          ) : (
+            filteredStudents.map((student) => {
+              const isRemoving = removingStudentId === student.Id;
+              return (
+                <View key={student.Id} style={styles.card}>
+                  <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
+                    <View style={styles.avatarBox}>
+                      <Text style={styles.avatarText}>{student.FullName ? student.FullName.charAt(0).toUpperCase() : 'H'}</Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.cardTitle} numberOfLines={1}>
+                        {student.FullName || 'Không rõ tên'}
+                      </Text>
+                      <Text style={styles.cardSubtitle} numberOfLines={1}>
+                        {student.Email || '--'}
+                      </Text>
+                    </View>
+                  </View>
 
-        <View className="mb-3">
-          <Text className="text-xl font-bold text-on-surface">Danh sách học sinh</Text>
-        </View>
-
-        {loading ? (
-          <View className="items-center justify-center py-12">
-            <ActivityIndicator size="large" color="#005bbf" />
-            <Text className="mt-3 text-on-surface-variant">Đang tải danh sách học sinh...</Text>
-          </View>
-        ) : error ? (
-          <View className="rounded-lg bg-red-100 px-3 py-2 mb-4 border border-red-200">
-            <Text className="text-red-700 text-sm">{error}</Text>
-          </View>
-        ) : students.length === 0 ? (
-          <View className="border-2 border-dashed border-outline-variant rounded-xl items-center justify-center p-8 bg-surface-container-low">
-            <MaterialIcons name="person-off" size={40} color="#727785" />
-            <Text className="text-on-surface-variant font-medium mt-3 text-base">Lớp hiện chưa có học sinh.</Text>
-          </View>
-        ) : filteredStudents.length === 0 ? (
-          <View className="border-2 border-dashed border-outline-variant rounded-xl items-center justify-center p-8 bg-surface-container-low">
-            <MaterialIcons name="search-off" size={40} color="#727785" />
-            <Text className="text-on-surface-variant font-medium mt-3 text-base">
-              Không tìm thấy học sinh theo tên hoặc email.
-            </Text>
-          </View>
-        ) : (
-          filteredStudents.map((student) => {
-            const isRemoving = removingStudentId === student.Id;
-            return (
-              <View
-                key={student.Id}
-                className="mb-3 rounded-2xl bg-surface-container-lowest px-4 py-3 flex-row items-center justify-between"
-                style={{ borderWidth: 1, borderColor: '#c1c6d64d' }}
-              >
-                <View className="flex-1 pr-3">
-                  <Text className="text-on-surface text-base font-bold" numberOfLines={1}>
-                    {student.FullName || 'Không rõ tên'}
-                  </Text>
-                  <Text className="text-on-surface-variant text-sm mt-1" numberOfLines={1}>
-                    {student.Email || '--'}
-                  </Text>
+                  <TouchableOpacity
+                    onPress={() => onOpenRemoveStudentModal(student)}
+                    disabled={isRemoving}
+                    style={styles.deleteButton}
+                  >
+                    {isRemoving ? (
+                      <ActivityIndicator size="small" color="#B42318" />
+                    ) : (
+                      <>
+                        <MaterialIcons name="delete-outline" size={16} color="#B42318" />
+                        <Text style={styles.deleteButtonText}>Xóa</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
                 </View>
-
-                <TouchableOpacity
-                  onPress={() => onOpenRemoveStudentModal(student)}
-                  disabled={isRemoving}
-                  className="h-10 rounded-xl px-3 bg-red-50 border border-red-100 flex-row items-center justify-center"
-                >
-                  {isRemoving ? (
-                    <ActivityIndicator size="small" color="#B42318" />
-                  ) : (
-                    <>
-                      <MaterialIcons name="delete-outline" size={16} color="#B42318" />
-                      <Text className="text-red-700 font-bold ml-1">Xóa</Text>
-                    </>
-                  )}
-                </TouchableOpacity>
-              </View>
             );
           })
         )}
+        </View>
       </ScrollView>
 
       <Modal
@@ -306,8 +304,92 @@ const ClassroomManagementScreen = ({ route, navigation }) => {
           </Pressable>
         </Pressable>
       </Modal>
-    </TeacherScreenShell>
+    </SafeAreaView>
   );
 };
 
 export default ClassroomManagementScreen;
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: COLORS.surface },
+  header: {
+    minHeight: 56,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    backgroundColor: COLORS.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.outlineVariant,
+  },
+  backButton: { width: 40, height: 40, justifyContent: 'center' },
+  headerTitleContainer: { flex: 1, marginLeft: 8 },
+  headerTitle: { fontSize: 18, fontWeight: '700', color: COLORS.onSurface },
+  headerSubtitle: { fontSize: 12, color: COLORS.onSurfaceVariant },
+  
+  scrollContent: { paddingBottom: 60 },
+  loadingBox: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
+  loadingText: { marginTop: 12, color: COLORS.onSurfaceVariant },
+  emptyText: { color: COLORS.onSurfaceVariant, fontSize: 12, marginTop: 8 },
+
+  infoSection: {
+    margin: 16,
+    backgroundColor: COLORS.surfaceContainerLowest,
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: COLORS.outlineVariant,
+    gap: 12,
+  },
+  infoRow: { gap: 6 },
+  infoLabel: { fontSize: 11, fontWeight: '700', color: COLORS.onSurfaceVariant, textTransform: 'uppercase' },
+  infoInputBlock: {
+    backgroundColor: COLORS.surfaceContainerLow,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+  },
+  infoInputText: {
+    fontSize: 13,
+    color: COLORS.onSurface,
+  },
+
+  listHeaderRow: {
+    marginHorizontal: 16,
+    marginBottom: 12,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  listTitle: { fontSize: 16, fontWeight: '700', color: COLORS.onSurface },
+  listCount: { fontSize: 12, color: COLORS.onSurfaceVariant, fontWeight: '600' },
+  listSection: { paddingHorizontal: 16 },
+  
+  card: {
+    backgroundColor: COLORS.surfaceContainerLowest,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: COLORS.outlineVariant,
+    ...Platform.select({ ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.03, shadowRadius: 8 }, android: { elevation: 2 } }),
+  },
+  cardTitle: { fontSize: 15, color: COLORS.onSurface, fontWeight: '600', marginBottom: 4 },
+  cardSubtitle: { fontSize: 13, color: COLORS.onSurfaceVariant },
+  avatarBox: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: COLORS.surfaceContainerLow,
+    borderWidth: 1,
+    borderColor: COLORS.outlineVariant,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  avatarText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: COLORS.primary,
+  },
+});

@@ -1,4 +1,5 @@
 import { createSlice } from '@reduxjs/toolkit';
+import { getSeededRandom, seededShuffleArray } from '../utils/shuffle';
 
 const examSlice = createSlice({
   name: 'exam',
@@ -9,13 +10,30 @@ const examSlice = createSlice({
     maxViolations: 3,
     isSubmitting: false,
     timeLeft: 0,
-    snapshotQuestions: [], // Questions in shuffled order
+    snapshotQuestions: [], // Questions in shuffled order with displaySlots
   },
   reducers: {
     setAttempt: (state, action) => {
       const { attempt, questions, duration } = action.payload;
       state.currentAttempt = attempt;
-      state.snapshotQuestions = questions;
+      
+      const shouldShuffleQuestions = Boolean(attempt.isShuffled && attempt.shuffleQuestions);
+      const shouldShuffleAnswers = Boolean(attempt.isShuffled && attempt.shuffleAnswers);
+      const randomFunc = getSeededRandom(attempt.id);
+
+      let pool = [...questions];
+      if (shouldShuffleQuestions) {
+        pool = seededShuffleArray(pool, randomFunc);
+      }
+
+      state.snapshotQuestions = pool.map((q) => {
+        const baseSlots = ['A', 'B', 'C', 'D'];
+        const slots = shouldShuffleAnswers ? seededShuffleArray(baseSlots, randomFunc) : baseSlots;
+        return {
+          ...q,
+          displaySlots: slots,
+        };
+      });
 
       const resolvedDuration = Number(
         duration

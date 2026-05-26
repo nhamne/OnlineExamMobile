@@ -333,9 +333,12 @@ const SessionScreen = ({ route, navigation }) => {
     }
 
     const options = await getTeacherSessionFormOptions(user.id);
+    const publishedExamPapers = Array.isArray(options?.examPapers)
+      ? options.examPapers.filter((item) => !item?.IsDraft && !item?.isDraft)
+      : [];
     const nextOptions = {
       classrooms: Array.isArray(options?.classrooms) ? options.classrooms : [],
-      examPapers: Array.isArray(options?.examPapers) ? options?.examPapers : [],
+      examPapers: publishedExamPapers,
     };
     setFormOptions(nextOptions);
     return nextOptions;

@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import examApi from '../api/exam.api';
+import { loadAuthSession } from '../services/authSession';
 import { COLORS } from '../constants/theme';
 
 const formatDateTime = (value) => {
@@ -25,7 +26,8 @@ const formatDateTime = (value) => {
 };
 
 const StudentResultsScreen = ({ navigation, route }) => {
-  const userId = route?.params?.userId;
+  const authUser = loadAuthSession();
+  const userId = route?.params?.userId || authUser?.id;
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [results, setResults] = useState([]);

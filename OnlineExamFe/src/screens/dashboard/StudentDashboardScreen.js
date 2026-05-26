@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Modal,
   Platform,
   RefreshControl,
   ScrollView,
@@ -12,20 +13,29 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import { 
+import {
   getStudentDashboard, 
   getStudentClassrooms, 
   joinClassroom,
   startExamAttempt,
   getStudentResultHistory,
+  examApi,
+  updateUserProfile,
+  changeUserPassword,
 } from '../../services/authService';
 import BottomSidebarNav from '../../components/BottomSidebarNav';
 import DashboardTopBar from '../../components/DashboardTopBar';
 import { useToast } from '../../context/ToastContext';
-import { clearAuthSession } from '../../services/authSession';
+import { clearAuthSession, loadAuthSession } from '../../services/authSession';
 import { useDispatch } from 'react-redux';
 import { setAttempt } from '../../store/useExamStore';
 import { COLORS } from '../../constants/theme';
+import StudentResultsContent from './StudentResultsContent';
+import * as Clipboard from 'expo-clipboard';
+
+const ambientShadow = Platform.OS === 'ios'
+  ? { shadowColor: '#005bbf', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.06, shadowRadius: 12 }
+  : { elevation: 2, shadowColor: '#005bbf' };
 
 const studentMenuItems = [
   { key: 'home', label: 'Trang chủ', shortLabel: 'Trang chủ', icon: 'home' },
@@ -57,8 +67,10 @@ const getSessionState = (item) => {
       label: 'Đã kết thúc',
       canEnter: false,
       action: 'result',
-      badgeStyle: { backgroundColor: '#fee2e2' },
-      textStyle: { color: '#b91c1c' },
+      badgeStyle: { backgroundColor: '#e2e8f0' },
+      textStyle: { color: '#334155' },
+      buttonStyle: { backgroundColor: '#e2e8f0' },
+      buttonTextStyle: { color: '#475569' },
     };
   }
 
@@ -68,8 +80,10 @@ const getSessionState = (item) => {
       label: 'Đã kết thúc',
       canEnter: false,
       action: 'none',
-      badgeStyle: { backgroundColor: '#f1f5f9' },
-      textStyle: { color: '#475569' },
+      badgeStyle: { backgroundColor: '#e2e8f0' },
+      textStyle: { color: '#334155' },
+      buttonStyle: { backgroundColor: '#e2e8f0' },
+      buttonTextStyle: { color: '#475569' },
     };
   }
 
@@ -79,8 +93,10 @@ const getSessionState = (item) => {
       label: 'Chưa bắt đầu',
       canEnter: false,
       action: 'none',
-      badgeStyle: { backgroundColor: '#fef3c7' },
-      textStyle: { color: '#b45309' },
+      badgeStyle: { backgroundColor: '#ffedd5' },
+      textStyle: { color: '#c2410c' },
+      buttonStyle: { backgroundColor: '#f8fafc' },
+      buttonTextStyle: { color: '#64748b' },
     };
   }
 
@@ -91,6 +107,8 @@ const getSessionState = (item) => {
     action: 'enter',
     badgeStyle: { backgroundColor: '#dbeafe' },
     textStyle: { color: COLORS.primary },
+      buttonStyle: { backgroundColor: COLORS.primary },
+      buttonTextStyle: { color: '#FFFFFF' },
   };
 };
 
@@ -119,34 +137,115 @@ const StatCard = ({ icon, label, value, tone = 'default', onPress }) => {
 const SessionCard = ({ item, onPress }) => {
   const state = getSessionState(item);
   const canPress = state.action !== 'none';
+  const buttonLabel = state.action === 'enter'
+    ? 'Vào thi'
+    : state.action === 'result'
+      ? 'Xem kết quả'
+      : state.key === 'upcoming'
+        ? 'Sắp diễn ra'
+        : 'Đã kết thúc';
 
   return (
-  <TouchableOpacity 
-    onPress={() => onPress && onPress(item)}
-    disabled={!canPress}
-    className="bg-surface-container-lowest rounded-2xl p-4 mb-3 border border-slate-100 shadow-sm"
-    style={{ opacity: canPress ? 1 : 0.85 }}
-  >
-    <View className="flex-row items-center justify-between">
-      <Text className="font-extrabold text-on-surface flex-1 pr-3" numberOfLines={1}>{item.SessionName}</Text>
-      <View className="px-2 py-1 rounded-lg" style={state.badgeStyle}>
-        <Text className="text-xs font-bold" style={state.textStyle}>{state.label}</Text>
+    <View
+      className="bg-surface-container-lowest p-0 rounded-3xl mb-4 overflow-hidden"
+      style={{ ...ambientShadow, opacity: canPress ? 1 : 0.9 }}
+    >
+      <View className="h-24 bg-slate-50 items-center justify-center relative">
+        <MaterialIcons
+          name={state.action === 'result' ? 'assignment' : 'event-note'}
+          size={46}
+          color={state.action === 'result' ? COLORS.primary : '#94A3B8'}
+        />
+        <View className="absolute right-3 top-3 px-2 py-1 rounded-full" style={{ backgroundColor: '#ffffffcc' }}>
+          <Text className="text-[10px] font-bold uppercase" style={{ color: state.textStyle.color }}>
+            {state.label}
+          </Text>
+        </View>
+      </View>
+
+      <View className="px-5 pb-5 pt-4 bg-white">
+        <Text className="text-xl font-bold text-on-surface" numberOfLines={2}>
+          {item.SessionName || '--'}
+        </Text>
+        <Text className="text-sm text-on-surface-variant mt-1" numberOfLines={1}>
+          {item.ExamTitle || '--'} • {item.ClassName || '--'}
+        </Text>
+
+        <View className="mt-3 gap-2">
+          <View className="flex-row items-center">
+            <MaterialIcons name="person-outline" size={16} color="#64748B" />
+            <Text className="text-sm text-on-surface-variant ml-1" numberOfLines={1}>
+              GV. {item.TeacherName || '--'}
+            </Text>
+          </View>
+          <View className="flex-row items-center">
+            <MaterialIcons name="schedule" size={16} color="#64748B" />
+            <Text className="text-sm text-on-surface-variant ml-1" numberOfLines={1}>
+              {item.DurationInMinutes || item.Duration || '--'} phút
+            </Text>
+          </View>
+          <View className="flex-row items-center">
+            <MaterialIcons name="calendar-today" size={16} color="#64748B" />
+            <Text className="text-sm text-primary font-semibold ml-1" numberOfLines={1}>
+              {item.StartTime ? `Hạn: ${new Date(item.StartTime).toLocaleDateString('vi-VN')} ${new Date(item.StartTime).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', hour12: false })}` : 'Hạn: --'}
+            </Text>
+          </View>
+        </View>
+
+        <TouchableOpacity
+          disabled={!canPress}
+          onPress={() => onPress && onPress(item)}
+          className="mt-4 h-12 rounded-xl items-center justify-center"
+          style={state.buttonStyle || { backgroundColor: canPress ? COLORS.primary : '#EEF2F7' }}
+        >
+          <Text className="font-bold" style={state.buttonTextStyle || { color: '#FFFFFF' }}>
+            {buttonLabel}
+          </Text>
+        </TouchableOpacity>
       </View>
     </View>
-    <View className="flex-row items-center mt-2">
-      <MaterialIcons name="class" size={14} color="#666" />
-      <Text className="text-sm text-on-surface-variant ml-1">Lớp: {item.ClassName}</Text>
-    </View>
-    <View className="flex-row items-center mt-1">
-      <MaterialIcons name="description" size={14} color="#666" />
-      <Text className="text-sm text-on-surface-variant ml-1">Bài thi: {item.ExamTitle}</Text>
-    </View>
-  </TouchableOpacity>
+  );
+};
+
+const RecentSessionCard = ({ item, onPress }) => {
+  const state = getSessionState(item);
+  const canPress = state.action !== 'none';
+
+  return (
+    <TouchableOpacity
+      onPress={() => onPress && onPress(item)}
+      disabled={!canPress}
+      className="bg-surface-container-lowest rounded-2xl p-4 mb-3 border border-slate-100"
+      style={{ opacity: canPress ? 1 : 0.85 }}
+    >
+      <View className="flex-row items-center justify-between">
+        <Text className="font-extrabold text-on-surface flex-1 pr-3" numberOfLines={1}>
+          {item.SessionName || '--'}
+        </Text>
+        <View className="px-2 py-1 rounded-lg" style={state.badgeStyle}>
+          <Text className="text-xs font-bold" style={state.textStyle}>
+            {state.label}
+          </Text>
+        </View>
+      </View>
+      <View className="flex-row items-center mt-2">
+        <MaterialIcons name="class" size={14} color="#666" />
+        <Text className="text-sm text-on-surface-variant ml-1" numberOfLines={1}>
+          Lớp: {item.ClassName || '--'}
+        </Text>
+      </View>
+      <View className="flex-row items-center mt-1">
+        <MaterialIcons name="description" size={14} color="#666" />
+        <Text className="text-sm text-on-surface-variant ml-1" numberOfLines={1}>
+          Bài thi: {item.ExamTitle || '--'}
+        </Text>
+      </View>
+    </TouchableOpacity>
   );
 };
 
 const StudentDashboardScreen = ({ route, navigation }) => {
-  const user = route.params?.user;
+  const user = route.params?.user || loadAuthSession();
   const dispatch = useDispatch();
   const { showToast } = useToast();
   
@@ -162,6 +261,25 @@ const StudentDashboardScreen = ({ route, navigation }) => {
   // Join classroom state
   const [joinCode, setJoinCode] = useState('');
   const [joining, setJoining] = useState(false);
+  const [joinModalVisible, setJoinModalVisible] = useState(false);
+  
+  // Password modal for exam session
+  const [passwordModalVisible, setPasswordModalVisible] = useState(false);
+  const [pendingSession, setPendingSession] = useState(null);
+  const [sessionPassword, setSessionPassword] = useState('');
+  const [verifyingPassword, setVerifyingPassword] = useState(false);
+
+  // Profile edit / password change
+  const [editProfileVisible, setEditProfileVisible] = useState(false);
+  const [editName, setEditName] = useState(user?.fullName || '');
+  const [editEmail, setEditEmail] = useState(user?.email || '');
+  const [savingProfile, setSavingProfile] = useState(false);
+
+  const [changePwdVisible, setChangePwdVisible] = useState(false);
+  const [currentPwd, setCurrentPwd] = useState('');
+  const [newPwd, setNewPwd] = useState('');
+  const [confirmPwd, setConfirmPwd] = useState('');
+  const [changingPwd, setChangingPwd] = useState(false);
 
   const initials = useMemo(() => {
     const fullName = user?.fullName || '';
@@ -202,6 +320,10 @@ const StudentDashboardScreen = ({ route, navigation }) => {
     }, [loadData])
   );
 
+  useEffect(() => {
+    // Left empty since viewingAttempt is removed
+  }, [activeMenu]);
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await loadData();
@@ -227,24 +349,56 @@ const StudentDashboardScreen = ({ route, navigation }) => {
     }
   };
 
+  const startExamWithPassword = async (session, password = null) => {
+    try {
+      showToast('Đang chuẩn bị bài thi...', 'info');
+      if (password) {
+        setVerifyingPassword(true);
+      }
+      const data = await startExamAttempt(user?.id, session.Id, password);
+      const examDuration = Number(
+        data?.attempt?.examDurationInMinutes
+        ?? data?.attempt?.duration
+        ?? session?.ExamPaperDurationInMinutes
+        ?? 0
+      );
+      dispatch(setAttempt({
+        attempt: data.attempt,
+        questions: data.questions,
+        duration: examDuration
+      }));
+      if (password) {
+        setPasswordModalVisible(false);
+        setSessionPassword('');
+      }
+      navigation.navigate('TakeExam');
+    } catch (err) {
+      if (err?.response?.data?.requirePassword) {
+        showToast('Mật khẩu không đúng.', 'error');
+      } else {
+        showToast(err?.response?.data?.message || 'Không thể vào ca thi.', 'error');
+      }
+    } finally {
+      if (password) {
+        setVerifyingPassword(false);
+      }
+    }
+  };
+
   const handleEnterSession = async (session) => {
     const sessionState = getSessionState(session);
     if (sessionState.action === 'result') {
       const directAttemptId = Number(session?.AttemptId);
       if (Number.isInteger(directAttemptId) && directAttemptId > 0) {
-        navigation.navigate('StudentExamDetail', { attemptId: directAttemptId });
+        navigation.navigate('StudentExamDetail', { attemptId: directAttemptId, sessionName: session?.SessionName || '' });
         return;
       }
 
       try {
-        const history = await getStudentResultHistory(user?.id);
-        const matched = Array.isArray(history)
-          ? history.find((item) => Number(item?.SessionId) === Number(session?.Id))
-          : null;
-        const fallbackAttemptId = Number(matched?.AttemptId);
-
-        if (Number.isInteger(fallbackAttemptId) && fallbackAttemptId > 0) {
-          navigation.navigate('StudentExamDetail', { attemptId: fallbackAttemptId });
+        const detail = await examApi.getResultDetailBySession(session.Id);
+        const fallbackAttemptId = detail?.data?.id || detail?.data?.attemptId;
+        if (fallbackAttemptId) {
+          navigation.navigate('StudentExamDetail', { attemptId: fallbackAttemptId, sessionName: session?.SessionName || '' });
           return;
         }
 
@@ -266,24 +420,20 @@ const StudentDashboardScreen = ({ route, navigation }) => {
       return;
     }
 
-    try {
-      showToast('Đang chuẩn bị bài thi...', 'info');
-      const data = await startExamAttempt(user?.id, session.Id);
-      const examDuration = Number(
-        data?.attempt?.examDurationInMinutes
-        ?? data?.attempt?.duration
-        ?? session?.ExamPaperDurationInMinutes
-        ?? 0
-      );
-      dispatch(setAttempt({
-        attempt: data.attempt,
-        questions: data.questions,
-        duration: examDuration
-      }));
-      navigation.navigate('TakeExam');
-    } catch (err) {
-      showToast(err?.response?.data?.message || 'Không thể vào ca thi.', 'error');
+    if (session.HasPassword) {
+      setPendingSession(session);
+      setPasswordModalVisible(true);
+    } else {
+      await startExamWithPassword(session);
     }
+  };
+
+  const submitSessionPassword = () => {
+    if (!sessionPassword.trim()) {
+      showToast('Vui lòng nhập mật khẩu ca thi', 'warning');
+      return;
+    }
+    startExamWithPassword(pendingSession, sessionPassword);
   };
 
   const filterKeyword = searchText.trim().toLowerCase();
@@ -331,7 +481,7 @@ const StudentDashboardScreen = ({ route, navigation }) => {
       </View>
 
       {filteredSessions.slice(0, 4).map((item) => (
-        <SessionCard key={String(item.Id)} item={item} onPress={handleEnterSession} />
+        <RecentSessionCard key={String(item.Id)} item={item} onPress={handleEnterSession} />
       ))}
 
       {filteredSessions.length === 0 ? (
@@ -343,104 +493,173 @@ const StudentDashboardScreen = ({ route, navigation }) => {
     </>
   );
 
+  const onCopyJoinCode = async (code) => {
+    try {
+      await Clipboard.setStringAsync(code);
+      showToast('Đã sao chép mã tham gia.', 'success');
+    } catch (_error) {
+      showToast(`Mã tham gia: ${code}`, 'info');
+    }
+  };
+
+  const openJoinModal = () => {
+    setJoinModalVisible(true);
+  };
+
+  const closeJoinModal = () => {
+    if (joining) return;
+    setJoinModalVisible(false);
+  };
+
   const renderClasses = () => (
     <View>
       {/* Join Section */}
-      <View className="bg-white rounded-2xl p-5 mb-6 border border-slate-100 shadow-sm">
-        <Text className="text-xl font-black text-on-surface mb-2">Tham gia lớp học</Text>
-        <Text className="text-on-surface-variant mb-4 text-sm">
-          Nhập mã lớp do giáo viên cung cấp để bắt đầu.
-        </Text>
-        <View className="flex-col gap-2">
-          <TextInput
-            className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 h-14 text-on-surface font-medium"
-            placeholder="Mã lớp (VD: WEB101)"
-            value={joinCode}
-            onChangeText={setJoinCode}
-            autoCapitalize="characters"
-          />
-          <TouchableOpacity
-            className={`bg-primary rounded-xl px-6 h-12 items-center justify-center ${joining ? 'opacity-70' : ''}`}
-            onPress={handleJoinClass}
-            disabled={joining}
-          >
-            {joining ? <ActivityIndicator color="#FFF" /> : <Text className="text-white font-black">THAM GIA</Text>}
-          </TouchableOpacity>
-        </View>
-      </View>
+      <TouchableOpacity
+        className="bg-primary rounded-2xl px-5 py-4 mb-6 flex-row items-center justify-center shadow-sm"
+        onPress={openJoinModal}
+      >
+        <MaterialIcons name="group-add" size={22} color="#FFFFFF" />
+        <Text className="text-white font-black text-base ml-2">Tham gia lớp học</Text>
+      </TouchableOpacity>
 
-      {/* List Section */}
-      <Text className="text-lg font-black text-on-surface mb-3">Lớp học của bạn ({classrooms.length})</Text>
-      {classrooms.length > 0 ? (
-        classrooms.map((c) => (
-          <View key={c.Id} className="bg-white p-4 rounded-2xl mb-3 border border-slate-100 flex-row items-center">
-            <View className="w-12 h-12 rounded-full bg-blue-50 items-center justify-center mr-4">
-              <MaterialIcons name="school" size={24} color={COLORS.primary} />
-            </View>
-            <View className="flex-1">
-              <Text className="font-bold text-on-surface text-base">{c.ClassName}</Text>
-              <Text className="text-xs text-on-surface-variant">Giáo viên: {c.TeacherName}</Text>
-              <Text className="text-[10px] text-primary font-bold uppercase tracking-widest mt-1">Mã: {c.JoinCode}</Text>
+      <Modal
+        visible={joinModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={closeJoinModal}
+      >
+        <View className="flex-1 bg-black/40 items-center justify-center px-4">
+          <View className="w-full max-w-[420px] bg-white rounded-3xl p-5 border border-slate-100">
+            <Text className="text-xl font-black text-on-surface mb-2">Tham gia lớp học</Text>
+            <Text className="text-on-surface-variant mb-4 text-sm">
+              Nhập mã lớp do giáo viên cung cấp để bắt đầu.
+            </Text>
+
+            <TextInput
+              className="bg-slate-50 border border-slate-200 rounded-xl px-4 h-14 text-on-surface font-medium mb-4"
+              placeholder="Mã lớp (VD: WEB101)"
+              value={joinCode}
+              onChangeText={setJoinCode}
+              autoCapitalize="characters"
+              autoFocus
+            />
+
+            <View className="flex-row gap-3">
+              <TouchableOpacity
+                className="flex-1 h-12 rounded-xl items-center justify-center bg-slate-100"
+                onPress={closeJoinModal}
+                disabled={joining}
+              >
+                <Text className="text-on-surface font-bold">Hủy</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                className={`flex-1 h-12 rounded-xl items-center justify-center bg-primary ${joining ? 'opacity-70' : ''}`}
+                onPress={handleJoinClass}
+                disabled={joining}
+              >
+                {joining ? (
+                  <ActivityIndicator color="#FFF" />
+                ) : (
+                  <Text className="text-white font-black">THAM GIA</Text>
+                )}
+              </TouchableOpacity>
             </View>
           </View>
-        ))
-      ) : (
-        <View className="bg-white rounded-2xl p-8 items-center border border-slate-100">
-          <MaterialIcons name="group-off" size={48} color="#CBD5E1" />
-          <Text className="text-on-surface-variant mt-2">Bạn chưa tham gia lớp học nào.</Text>
         </View>
-      )}
+      </Modal>
+
+      {/* List Section */}
+      <View className="flex-col gap-1 mb-4">
+        <Text className="text-xl font-bold text-on-surface">Lớp học của bạn</Text>
+        
+      </View>
+      <View className="flex-col">
+        {classrooms.length > 0 ? (
+          classrooms.map((c) => {
+            const createdAt = c.CreatedAt ? new Date(c.CreatedAt).toLocaleDateString('vi-VN') : '--';
+            return (
+              <View
+                key={c.Id}
+                style={ambientShadow}
+                className="mb-4 bg-surface-container-lowest rounded-3xl overflow-hidden"
+              >
+                <View className="h-20 py-4 bg-primary items-center justify-center">
+                  <MaterialIcons name="school" size={50} color="#FFFFFF" />
+                </View>
+
+                <View className="p-5">
+                  <Text className="text-xl font-bold text-on-surface mb-1" numberOfLines={2}>
+                    {c.ClassName}
+                  </Text>
+                  <Text className="text-on-surface-variant text-sm mt-1">
+                    Giáo viên: <Text className="font-semibold text-on-surface">{c.TeacherName}</Text>
+                  </Text>
+                  <Text className="text-on-surface-variant text-sm mt-1">
+                    Ngày tạo: {createdAt}
+                  </Text>
+
+                 
+                  
+                  
+                </View>
+              </View>
+            );
+          })
+        ) : (
+          <View className="p-4 rounded-xl border border-dashed bg-surface-container-high items-center" style={{ borderColor: '#c1c6d699', backgroundColor: '#e6e8f266' }}>
+            <Text className="text-sm text-on-surface-variant text-center">Bạn chưa tham gia lớp học nào.</Text>
+          </View>
+        )}
+      </View>
     </View>
   );
 
-  const renderSessions = () => (
-    <>
-      <Text className="text-xl font-black text-on-surface mb-3">Danh sách ca thi</Text>
-      {filteredSessions.length > 0 ? (
-        filteredSessions.map((item) => (
-          <SessionCard key={String(item.Id)} item={item} onPress={handleEnterSession} />
-        ))
-      ) : (
-        <View className="bg-white rounded-2xl p-8 items-center border border-slate-100">
-          <MaterialIcons name="assignment-late" size={48} color="#CBD5E1" />
-          <Text className="text-on-surface-variant mt-2 text-center">
-            Hiện chưa có ca thi nào được phân công.
-          </Text>
-        </View>
-      )}
-    </>
-  );
-
-  const renderStats = () => {
-    const joined = Number(summary?.JoinedClassroomCount ?? 0);
-    const submitted = Number(summary?.SubmittedCount ?? 0);
-    const upcoming = Number(summary?.UpcomingSessionCount ?? 0);
-    const completion = joined > 0 ? Math.round((submitted / joined) * 100) : 0;
+  const renderSessions = () => {
+    const activeSessions = filteredSessions.filter(s => getSessionState(s).key === 'active');
+    const upcomingSessions = filteredSessions.filter(s => getSessionState(s).key === 'upcoming');
+    const pastSessions = filteredSessions.filter(s => {
+      const k = getSessionState(s).key;
+      return k === 'ended' || k === 'submitted' || k === 'forced';
+    });
 
     return (
-      <>
-        <Text className="text-xl font-black text-on-surface mb-3">Thống kê kết quả</Text>
-        <View className="flex-row gap-3 mb-3">
-          <StatCard icon="task-alt" label="Tỉ lệ hoàn thành" value={`${completion}%`} tone="highlight" />
-          <StatCard icon="event-upcoming" label="Lịch thi sắp tới" value={upcoming} />
-        </View>
-        <View className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm">
-          <Text className="text-xs text-on-surface-variant font-bold uppercase tracking-widest mb-1">Đánh giá tiến độ</Text>
-          <Text className="text-base font-semibold text-on-surface leading-6">
-            {completion >= 80
-              ? 'Tiến độ học tập rất tốt, hãy tiếp tục duy trì phong độ này!'
-              : 'Hãy cố gắng hoàn thành thêm các bài thi để cải thiện kết quả học tập.'}
-          </Text>
-          <TouchableOpacity
-            className="mt-4 flex-row items-center"
-            onPress={() => navigation.navigate('StudentResults', { userId: user?.id })}
-          >
-            <Text className="text-primary font-bold mr-1">Xem lịch sử kết quả thi</Text>
-            <MaterialIcons name="chevron-right" size={20} color={COLORS.primary} />
-          </TouchableOpacity>
-          
-        </View>
-      </>
+      <View className="mb-8 mt-2">
+        {filteredSessions.length === 0 ? (
+          <View className="p-4 rounded-xl border border-dashed bg-surface-container-high items-center" style={{ borderColor: '#c1c6d699', backgroundColor: '#e6e8f266' }}>
+            <Text className="text-sm text-on-surface-variant text-center">Hiện chưa có ca thi nào được phân công.</Text>
+          </View>
+        ) : (
+          <View className="flex-col gap-6">
+            {activeSessions.length > 0 && (
+              <View>
+                <Text className="text-base font-bold text-primary mb-3">Đang diễn ra ({activeSessions.length})</Text>
+                {activeSessions.map((item) => (
+                  <SessionCard key={String(item.Id)} item={item} onPress={handleEnterSession} />
+                ))}
+              </View>
+            )}
+            
+            {upcomingSessions.length > 0 && (
+              <View>
+                <Text className="text-base font-bold text-amber-600 mb-3">Sắp diễn ra ({upcomingSessions.length})</Text>
+                {upcomingSessions.map((item) => (
+                  <SessionCard key={String(item.Id)} item={item} onPress={handleEnterSession} />
+                ))}
+              </View>
+            )}
+
+            {pastSessions.length > 0 && (
+              <View>
+                <Text className="text-base font-bold text-on-surface-variant mb-3">Đã kết thúc / Đã nộp ({pastSessions.length})</Text>
+                {pastSessions.map((item) => (
+                  <SessionCard key={String(item.Id)} item={item} onPress={handleEnterSession} />
+                ))}
+              </View>
+            )}
+          </View>
+        )}
+      </View>
     );
   };
 
@@ -463,8 +682,26 @@ const StudentDashboardScreen = ({ route, navigation }) => {
           <ProfileRow icon="school" label="Trạng thái" value="Đang học" />
         </View>
 
+        <View className="mt-5 flex-row gap-3">
+          <TouchableOpacity
+            className="flex-1 bg-primary rounded-xl h-11 items-center justify-center flex-row"
+            onPress={() => setEditProfileVisible(true)}
+          >
+            <MaterialIcons name="edit" size={18} color="#FFFFFF" />
+            <Text className="text-white font-bold ml-2">Chỉnh sửa</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            className="flex-1 bg-surface-container-high rounded-xl h-11 items-center justify-center flex-row border"
+            onPress={() => setChangePwdVisible(true)}
+          >
+            <MaterialIcons name="vpn-key" size={16} color="#1F2937" />
+            <Text className="text-on-surface font-bold ml-2">Đổi mật khẩu</Text>
+          </TouchableOpacity>
+        </View>
+
         <TouchableOpacity
-          className="mt-6 bg-red-50 rounded-2xl h-14 items-center justify-center border border-red-100"
+          className=" mt-4 bg-red-50 rounded-2xl h-12 items-center justify-center border border-red-100"
           onPress={() => {
             clearAuthSession();
             showToast('Bạn đã đăng xuất.', 'info');
@@ -473,6 +710,69 @@ const StudentDashboardScreen = ({ route, navigation }) => {
         >
           <Text className="text-red-600 font-black text-base">Đăng xuất</Text>
         </TouchableOpacity>
+
+        {/* Edit profile modal */}
+        <Modal visible={editProfileVisible} transparent animationType="fade" onRequestClose={() => setEditProfileVisible(false)}>
+          <View className="flex-1 bg-black/40 items-center justify-center px-4">
+            <View className="w-full max-w-[420px] bg-white rounded-3xl p-5 border border-slate-100">
+              <Text className="text-xl font-black text-on-surface mb-2">Chỉnh sửa thông tin</Text>
+              <TextInput className="bg-slate-50 border border-slate-200 rounded-xl px-4 h-12 text-on-surface font-medium mb-3" value={editName} onChangeText={setEditName} placeholder="Họ và tên" />
+              <TextInput className="bg-slate-50 border border-slate-200 rounded-xl px-4 h-12 text-on-surface font-medium mb-4" value={editEmail} onChangeText={setEditEmail} placeholder="Email" keyboardType="email-address" autoCapitalize="none" />
+              <View className="flex-row gap-3">
+                <TouchableOpacity className="flex-1 h-12 rounded-xl items-center justify-center bg-slate-100" onPress={() => setEditProfileVisible(false)} disabled={savingProfile}>
+                  <Text className="text-on-surface font-bold">Hủy</Text>
+                </TouchableOpacity>
+                <TouchableOpacity className={`flex-1 h-12 rounded-xl items-center justify-center bg-primary ${savingProfile ? 'opacity-70' : ''}`} onPress={async () => {
+                  if (!editName.trim() || !editEmail.trim()) { showToast('Vui lòng điền tên và email.', 'warning'); return; }
+                  setSavingProfile(true);
+                  try {
+                    const res = await updateUserProfile(user?.id, { fullName: editName.trim(), email: editEmail.trim() });
+                    showToast(res?.message || 'Cập nhật thành công', 'success');
+                    // update navigation params so parent screens see updated user
+                    navigation.setParams({ user: res?.user });
+                    setEditProfileVisible(false);
+                  } catch (err) {
+                    showToast(err?.response?.data?.message || err.message || 'Lỗi khi cập nhật.', 'error');
+                  } finally { setSavingProfile(false); }
+                }} disabled={savingProfile}>
+                  {savingProfile ? <ActivityIndicator color="#FFF" /> : <Text className="text-white font-black">LƯU</Text>}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
+        {/* Change password modal */}
+        <Modal visible={changePwdVisible} transparent animationType="fade" onRequestClose={() => setChangePwdVisible(false)}>
+          <View className="flex-1 bg-black/40 items-center justify-center px-4">
+            <View className="w-full max-w-[420px] bg-white rounded-3xl p-5 border border-slate-100">
+              <Text className="text-xl font-black text-on-surface mb-2">Đổi mật khẩu</Text>
+              <TextInput className="bg-slate-50 border border-slate-200 rounded-xl px-4 h-12 text-on-surface font-medium mb-3" value={currentPwd} onChangeText={setCurrentPwd} placeholder="Mật khẩu hiện tại" secureTextEntry />
+              <TextInput className="bg-slate-50 border border-slate-200 rounded-xl px-4 h-12 text-on-surface font-medium mb-3" value={newPwd} onChangeText={setNewPwd} placeholder="Mật khẩu mới" secureTextEntry />
+              <TextInput className="bg-slate-50 border border-slate-200 rounded-xl px-4 h-12 text-on-surface font-medium mb-4" value={confirmPwd} onChangeText={setConfirmPwd} placeholder="Xác nhận mật khẩu mới" secureTextEntry />
+              <View className="flex-row gap-3">
+                <TouchableOpacity className="flex-1 h-12 rounded-xl items-center justify-center bg-slate-100" onPress={() => setChangePwdVisible(false)} disabled={changingPwd}>
+                  <Text className="text-on-surface font-bold">Hủy</Text>
+                </TouchableOpacity>
+                <TouchableOpacity className={`flex-1 h-12 rounded-xl items-center justify-center bg-primary ${changingPwd ? 'opacity-70' : ''}`} onPress={async () => {
+                  if (!currentPwd || !newPwd) { showToast('Vui lòng nhập đầy đủ thông tin.', 'warning'); return; }
+                  if (newPwd !== confirmPwd) { showToast('Mật khẩu xác nhận không khớp.', 'warning'); return; }
+                  setChangingPwd(true);
+                  try {
+                    await changeUserPassword(user?.id, currentPwd, newPwd);
+                    showToast('Đổi mật khẩu thành công.', 'success');
+                    setChangePwdVisible(false);
+                    setCurrentPwd(''); setNewPwd(''); setConfirmPwd('');
+                  } catch (err) {
+                    showToast(err?.response?.data?.message || err.message || 'Lỗi khi đổi mật khẩu.', 'error');
+                  } finally { setChangingPwd(false); }
+                }} disabled={changingPwd}>
+                  {changingPwd ? <ActivityIndicator color="#FFF" /> : <Text className="text-white font-black">ĐỔI</Text>}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
       </View>
     </View>
   );
@@ -490,7 +790,14 @@ const StudentDashboardScreen = ({ route, navigation }) => {
   const renderMainContent = () => {
     if (activeMenu === 'classes') return renderClasses();
     if (activeMenu === 'sessions') return renderSessions();
-    if (activeMenu === 'results') return renderStats();
+    if (activeMenu === 'results') {
+      return (
+        <StudentResultsContent
+          userId={user?.id}
+          onSelectAttempt={(id, sessionName) => navigation.navigate('StudentExamDetail', { attemptId: id, sessionName: sessionName || '' })}
+        />
+      );
+    }
     if (activeMenu === 'profile') return renderProfile();
     return renderOverview();
   };
@@ -525,15 +832,32 @@ const StudentDashboardScreen = ({ route, navigation }) => {
         contentContainerStyle={{ paddingTop: 0, paddingBottom: 100 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
-        <View className="mb-8 mt-6">
-          <Text className="text-on-surface-variant font-bold text-xs tracking-[2px] uppercase mb-1">
-            {activeMenu === 'profile'
+        <View className="mb-4 mt-6">
+          <Text className="text-primary text-2xl font-bold tracking-tight mb-1">
+            {activeMenu === 'home'
+              ? 'Tổng quan'
+              : activeMenu === 'profile'
               ? 'Tài khoản'
-              : studentMenuItems.find((item) => item.key === activeMenu)?.label || 'Trang chủ'}
+              : studentMenuItems.find((item) => item.key === activeMenu)?.label}
           </Text>
-          <Text className="text-3xl font-black text-on-surface tracking-tight leading-tight" numberOfLines={2}>
-            Chào bạn,{"\n"}{user?.fullName || 'Học sinh'}!
-          </Text>
+          {activeMenu === 'sessions' && (
+            <Text className="text-sm font-medium text-on-surface-variant">
+              Tổng số ca thi: {filteredSessions.length}
+            </Text>
+          )}
+          {activeMenu === 'results' && (
+            <Text className="text-sm font-medium text-on-surface-variant">
+              Tổng số bài làm: {summary?.SubmittedCount ?? 0}
+            </Text>
+          )}
+          {activeMenu === 'home' && (
+            <Text className="text-3xl font-semibold text-on-surface tracking-tight leading-tight" numberOfLines={2}>
+              Chào bạn,{"\n"}{user?.fullName || 'Học sinh'}!
+            </Text>
+          )}
+          {activeMenu === 'classes' && (
+            <Text className="text-sm font-medium text-on-surface-variant">Tổng số lớp học: {classrooms.length}</Text>
+          )}
         </View>
 
         {error ? (
@@ -550,6 +874,57 @@ const StudentDashboardScreen = ({ route, navigation }) => {
         activeKey={activeMenu}
         onSelect={(item) => setActiveMenu(item.key)}
       />
+
+      {/* Password Modal */}
+      <Modal visible={passwordModalVisible} transparent animationType="fade">
+        <View className="flex-1 bg-black/50 justify-center items-center px-4">
+          <View className="bg-white rounded-2xl p-6 w-full max-w-sm" style={ambientShadow}>
+            <View className="flex-row items-center justify-between mb-4">
+              <Text className="text-xl font-bold text-on-surface">Nhập mật khẩu</Text>
+              <TouchableOpacity onPress={() => { setPasswordModalVisible(false); setSessionPassword(''); }}>
+                <MaterialIcons name="close" size={24} color="#64748B" />
+              </TouchableOpacity>
+            </View>
+            <Text className="text-on-surface-variant text-sm mb-4">
+              Ca thi <Text className="font-bold">"{pendingSession?.SessionName}"</Text> yêu cầu mật khẩu để vào thi.
+            </Text>
+            
+            <View className="bg-surface-container-low rounded-xl px-4 py-2 border border-surface-container-high mb-6">
+              <Text className="text-xs text-on-surface-variant font-medium mb-1">Mật khẩu ca thi</Text>
+              <TextInput
+                className="text-base text-on-surface font-medium py-1"
+                placeholder="Nhập mật khẩu..."
+                placeholderTextColor="#94A3B8"
+                secureTextEntry
+                value={sessionPassword}
+                onChangeText={setSessionPassword}
+                autoCapitalize="none"
+              />
+            </View>
+
+            <View className="flex-row gap-3">
+              <TouchableOpacity 
+                className="flex-1 py-3 rounded-xl items-center border border-surface-container-highest"
+                onPress={() => { setPasswordModalVisible(false); setSessionPassword(''); }}
+              >
+                <Text className="text-on-surface font-bold">Hủy</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                className={`flex-1 py-3 rounded-xl items-center bg-primary ${verifyingPassword ? 'opacity-70' : ''}`}
+                onPress={submitSessionPassword}
+                disabled={verifyingPassword}
+              >
+                {verifyingPassword ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <Text className="text-white font-bold">Vào thi</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
     </SafeAreaView>
   );
 };

@@ -186,23 +186,20 @@ const ExamEditorContent = ({ navigation, route }) => {
 
   return (
     <SafeAreaView style={styles.container}>
+      <View style={[styles.header, { paddingTop: Math.max(insets.top, Platform.OS === 'android' ? (StatusBar.currentHeight || 0) : 0) }]}>
+        <TouchableOpacity style={styles.backButton} onPress={() => navigation.replace('TeacherDashboard', { initialTab: 'exams' })}>
+          <MaterialIcons name="arrow-back" size={20} color={COLORS.primary} />
+        </TouchableOpacity>
+        <View style={styles.headerTitleContainer}>
+          <Text style={styles.headerTitle}>Tạo đề thi thủ công</Text>
+          <Text style={styles.headerSubtitle}>Nhập câu hỏi theo định dạng. Dấu * là đáp án đúng.</Text>
+        </View>
+      </View>
+
       <ScrollView
         contentContainerStyle={[styles.scrollContent, { paddingBottom: 24 + insets.bottom }]}
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.headerSection}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => navigation.replace('TeacherDashboard', { initialTab: 'exams' })}
-          >
-            <MaterialIcons name="arrow-back" size={18} color={COLORS.onSurface} />
-            <Text style={styles.backButtonText}>Quay lại</Text>
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Tạo đề thi thủ công</Text>
-          <Text style={styles.headerSubtitle}>
-            Nhập câu hỏi theo định dạng. Dấu * là đáp án đúng.
-          </Text>
-        </View>
 
         <View style={styles.editorSection}>
           <TextInput
@@ -302,26 +299,22 @@ const PreviewCard = ({ number, question, options, pointsPerQuestion, onSelectOpt
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.surfaceContainerLowest },
-  scrollContent: { padding: 16, paddingBottom: 24 },
-  headerSection: {
-    marginBottom: 16,
-    paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 0) : 0,
-  },
-  backButton: {
+  header: {
+    minHeight: 56,
+    paddingVertical: 10,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    alignSelf: 'flex-start',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 10,
-    backgroundColor: '#eceef0',
-    marginTop: 6,
-    marginBottom: 10,
+    paddingHorizontal: 16,
+    backgroundColor: COLORS.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.outlineVariant,
   },
-  backButtonText: { color: COLORS.onSurface, fontSize: 12, fontWeight: '700' },
-  headerTitle: { color: COLORS.primary, fontSize: 18, fontWeight: '700' },
-  headerSubtitle: { color: COLORS.onSurfaceVariant, fontSize: 12, marginTop: 4 },
+  backButton: { width: 40, height: 40, justifyContent: 'center' },
+  headerTitleContainer: { flex: 1, marginLeft: 8 },
+  headerTitle: { fontSize: 18, fontWeight: '700', color: COLORS.onSurface },
+  headerSubtitle: { fontSize: 12, color: COLORS.onSurfaceVariant },
+  
+  scrollContent: { padding: 16, paddingBottom: 24 },
   editorSection: {
     backgroundColor: COLORS.surfaceContainerLowest,
     borderRadius: 16,
