@@ -179,6 +179,9 @@ export default function ExamDetailScreen({ navigation, route }) {
   const [formDuration, setFormDuration] = useState('');
   const [formIsDraft, setFormIsDraft] = useState(false);
   const originalExamRef = useRef(null);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const confirmActionRef = useRef(null);
+  const allowExitRef = useRef(false);
 
   useEffect(() => {
     const loadDetail = async () => {
@@ -224,7 +227,7 @@ export default function ExamDetailScreen({ navigation, route }) {
     [editingId, questions]
   );
 
-  const isExamDirty = useMemo(() => {
+  const isExamDirty = () => {
     const originalExam = originalExamRef.current;
     if (!originalExam) return false;
     const titleChanged = formTitle.trim() !== String(originalExam.Title || '').trim();
@@ -232,7 +235,7 @@ export default function ExamDetailScreen({ navigation, route }) {
     const durationChanged = Number(formDuration) !== Number(originalExam.DurationInMinutes || 0);
     const draftChanged = Boolean(formIsDraft) !== Boolean(originalExam.IsDraft);
     return titleChanged || subjectChanged || durationChanged || draftChanged;
-  }, [formTitle, formSubject, formDuration, formIsDraft]);
+  };
 
   const isEditingDirty = useMemo(() => {
     if (!currentEditingQuestion) return false;
@@ -245,7 +248,7 @@ export default function ExamDetailScreen({ navigation, route }) {
     return false;
   }, [currentEditingQuestion, editQuestion, editOptions, editCorrectOption]);
 
-  const isDirty = isExamDirty || isEditingDirty;
+  const isDirty = isExamDirty() || isEditingDirty;
 
   const performDelete = async (questionId) => {
     try {
@@ -451,7 +454,7 @@ export default function ExamDetailScreen({ navigation, route }) {
       return false;
     }
 
-    if (isExamDirty) {
+    if (isExamDirty()) {
       if (!formTitle.trim()) {
         showToast('Vui lòng nhập tên đề thi.', 'error');
         return false;
@@ -539,7 +542,7 @@ export default function ExamDetailScreen({ navigation, route }) {
     user?.id,
     examId,
     showToast,
-    isExamDirty,
+    showToast,
     formTitle,
     formSubject,
     formDuration,
@@ -554,6 +557,7 @@ export default function ExamDetailScreen({ navigation, route }) {
 
   useEffect(() => {
     const beforeRemove = navigation.addListener('beforeRemove', (event) => {
+      if (allowExitRef.current) return;
       if (!isDirty) return;
 
       event.preventDefault();
@@ -571,53 +575,33 @@ export default function ExamDetailScreen({ navigation, route }) {
         navigation.dispatch(event.data.action);
       };
 
-      setShowConfirmModal(true);
       confirmActionRef.current = confirmAction;
-      return;
-      // Modal xác nhận cập nhật đề thi
-      const [showConfirmModal, setShowConfirmModal] = useState(false);
-      const confirmActionRef = useRef(null);
-      const handleConfirmSave = (shouldSave) => {
-        setShowConfirmModal(false);
-        if (confirmActionRef.current) {
-          confirmActionRef.current(shouldSave);
-          confirmActionRef.current = null;
-        }
-      };
-          <Modal
-            visible={showConfirmModal}
-            transparent
-            animationType="fade"
-            onRequestClose={() => setShowConfirmModal(false)}
-          >
-            <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'center', alignItems: 'center' }}>
-              <View style={{ backgroundColor: '#fff', borderRadius: 16, padding: 24, minWidth: 280, alignItems: 'center' }}>
-                <MaterialIcons name="help-outline" size={36} color={COLORS.primary} style={{ marginBottom: 12 }} />
-                <Text style={{ fontWeight: 'bold', fontSize: 16, marginBottom: 8 }}>Chưa lưu thay đổi</Text>
-                <Text style={{ color: COLORS.onSurfaceVariant, textAlign: 'center', marginBottom: 20 }}>
-                  Bạn có muốn lưu thay đổi trước khi rời đi không?
-                </Text>
-                <View style={{ flexDirection: 'row', gap: 12 }}>
-                  <TouchableOpacity
-                    style={{ backgroundColor: '#e5e7eb', borderRadius: 8, paddingVertical: 10, paddingHorizontal: 24 }}
-                    onPress={() => handleConfirmSave(false)}
-                  >
-                    <Text style={{ color: COLORS.onSurface, fontWeight: 'bold', fontSize: 15 }}>Không lưu</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={{ backgroundColor: COLORS.primary, borderRadius: 8, paddingVertical: 10, paddingHorizontal: 24 }}
-                    onPress={() => handleConfirmSave(true)}
-                  >
-                    <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>Lưu</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </View>
-          </Modal>
+
+      if (Platform.OS === 'web') {
+        setShowConfirmModal(true);
+      } else {
+        Alert.alert(
+          'Lưu thay đổi?',
+          'Bạn có muốn lưu các thay đổi trước khi thoát không?',
+          [
+            { text: 'Hủy', style: 'cancel', onPress: () => {} },
+            { text: 'Không lưu', style: 'destructive', onPress: () => handleConfirmSave(false) },
+            { text: 'Lưu', onPress: () => handleConfirmSave(true) },
+          ]
+        );
+      }
     });
 
     return beforeRemove;
   }, [navigation, isDirty, savePendingChanges, discardPendingChanges]);
+
+  const handleConfirmSave = useCallback((shouldSave) => {
+    setShowConfirmModal(false);
+    if (confirmActionRef.current) {
+      confirmActionRef.current(shouldSave);
+      confirmActionRef.current = null;
+    }
+  }, []);
 
   const handleUpdateExam = async () => {
     if (!user?.id || !examId) {
@@ -653,6 +637,7 @@ export default function ExamDetailScreen({ navigation, route }) {
       setExam(result?.examPaper || exam);
       originalExamRef.current = result?.examPaper || exam || originalExamRef.current;
       showToast('Đã cập nhật đề thi.', 'success');
+      allowExitRef.current = true;
       navigation.goBack();
     } catch (err) {
       showToast(err?.response?.data?.message || 'Không thể cập nhật đề thi.', 'error');
@@ -858,6 +843,37 @@ export default function ExamDetailScreen({ navigation, route }) {
                 <Text style={styles.modalAddButtonText}>Thêm</Text>
               )}
             </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={showConfirmModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowConfirmModal(false)}
+      >
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+          <View style={{ backgroundColor: '#fff', borderRadius: 16, padding: 24, width: '100%', maxWidth: 360, alignItems: 'center' }}>
+            <MaterialIcons name="help-outline" size={36} color={COLORS.primary} style={{ marginBottom: 12 }} />
+            <Text style={{ fontWeight: 'bold', fontSize: 16, marginBottom: 8 }}>Chưa lưu thay đổi</Text>
+            <Text style={{ color: COLORS.onSurfaceVariant, textAlign: 'center', marginBottom: 20 }}>
+              Bạn có muốn lưu thay đổi trước khi rời đi không?
+            </Text>
+            <View style={{ flexDirection: 'row', gap: 12 }}>
+              <TouchableOpacity
+                style={{ backgroundColor: '#e5e7eb', borderRadius: 8, paddingVertical: 10, paddingHorizontal: 24 }}
+                onPress={() => handleConfirmSave(false)}
+              >
+                <Text style={{ color: COLORS.onSurface, fontWeight: 'bold', fontSize: 15 }}>Không lưu</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={{ backgroundColor: COLORS.primary, borderRadius: 8, paddingVertical: 10, paddingHorizontal: 24 }}
+                onPress={() => handleConfirmSave(true)}
+              >
+                <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>Lưu</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>

@@ -202,12 +202,26 @@ export async function joinClassroom(userId, joinCode) {
   return response.data;
 }
 
-export async function startExamAttempt(userId, sessionId) {
-  const response = await api.post(`/api/exam/attempt/start/${sessionId}`, { studentId: userId });
+export async function startExamAttempt(userId, sessionId, password = null) {
+  const payload = { studentId: userId };
+  if (password) {
+    payload.password = password;
+  }
+  const response = await api.post(`/api/exam/attempt/start/${sessionId}`, payload);
   return response.data;
 }
 
 export async function getStudentResultHistory(userId) {
   const response = await api.get(`/api/exam/student/results/${userId}`);
+  return response.data;
+}
+
+export async function updateUserProfile(userId, payload) {
+  const response = await api.put(`/api/users/${userId}/profile`, payload);
+  return response.data;
+}
+
+export async function changeUserPassword(userId, currentPassword, newPassword) {
+  const response = await api.put(`/api/users/${userId}/password`, { currentPassword, newPassword });
   return response.data;
 }

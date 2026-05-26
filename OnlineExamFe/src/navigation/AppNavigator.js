@@ -16,14 +16,39 @@ import AIOCRScreen from '../screens/teacher/AIOCRScreen';
 import ExamDetailScreen from '../screens/teacher/ExamDetailScreen';
 import TakeExamScreen from '../screens/TakeExamScreen';
 import StatisticsScreen from '../screens/StatisticsScreen';
-import StudentExamDetailScreen from '../screens/ExamDetailScreen';
+import StudentExamDetailScreen from '../screens/StudentExamDetailScreen';
 import StudentResultsScreen from '../screens/StudentResultsScreen';
 
 const Stack = createNativeStackNavigator();
 
+const linking = {
+	prefixes: ['/'],
+	config: {
+		screens: {
+			Login: 'login',
+			Register: 'register',
+			TeacherDashboard: 'teacher',
+			TeacherProfile: 'teacher/profile',
+			TeacherClassrooms: 'teacher/classrooms',
+			TeacherClassroomManagement: 'teacher/classrooms/:classroomId',
+			TeacherSessions: 'teacher/sessions',
+			TeacherSessionManagement: 'teacher/sessions/:sessionId',
+			TeacherExamEditor: 'teacher/exam-editor',
+			TeacherManualExamForm: 'teacher/manual-exam',
+			TeacherAIOCR: 'teacher/ai-ocr',
+			TeacherExamDetail: 'teacher/exam-detail/:examId',
+			StudentDashboard: 'student',
+			TakeExam: 'student/take-exam',
+			StudentStatistics: 'student/statistics',
+			StudentResults: 'student/results',
+			StudentExamDetail: 'student/exam-detail/:attemptId',
+		},
+	},
+};
+
 const AppNavigator = ({ initialRouteName = 'Login', initialUser = null }) => {
 	return (
-		<NavigationContainer>
+		<NavigationContainer linking={linking}>
 			<Stack.Navigator
 				initialRouteName={initialRouteName}
 				screenOptions={{

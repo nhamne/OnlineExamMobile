@@ -88,7 +88,7 @@ const LoginScreen = ({ navigation }) => {
       setLoading(true);
       const response = await login({
         email: email.trim(),
-        password,
+        password: password.trim(),
         role,
         rememberMe,
       });
@@ -184,6 +184,8 @@ const LoginScreen = ({ navigation }) => {
                     secureTextEntry={!showPassword}
                     value={password}
                     onChangeText={setPassword}
+                    autoCapitalize="none"
+                    autoCorrect={false}
                     style={webInputFixStyle}
                   />
                   <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>

@@ -21,7 +21,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 
 const TakeExamScreen = ({ navigation, route }) => {
   const dispatch = useDispatch();
-  const { currentAttempt, snapshotQuestions, answers, isSubmitting } = useSelector(
+  const { currentAttempt, snapshotQuestions, answers, isSubmitting, violationCount, maxViolations } = useSelector(
     (state) => state.exam
   );
   
@@ -31,6 +31,23 @@ const TakeExamScreen = ({ navigation, route }) => {
   const allowExitRef = useRef(false);
 
   // Prevention of accidental exit and force 0 score on exit
+  useEffect(() => {
+    if (Platform.OS === 'web') {
+      const handleBeforeUnload = (e) => {
+        if (!allowExitRef.current && !isSubmitting) {
+          e.preventDefault();
+          e.returnValue = ''; // Needed for some browsers to show prompt
+          return '';
+        }
+      };
+      window.addEventListener('beforeunload', handleBeforeUnload);
+
+      return () => {
+        window.removeEventListener('beforeunload', handleBeforeUnload);
+      };
+    }
+  }, [isSubmitting]);
+
   useEffect(() => {
     const unsubscribe = navigation.addListener('beforeRemove', (e) => {
       if (allowExitRef.current) return;
@@ -160,11 +177,20 @@ const TakeExamScreen = ({ navigation, route }) => {
 
       {/* Header */}
       <View style={styles.header}>
-        <View>
-          <Text style={styles.timerTitle}>Thời gian còn lại</Text>
-          <Text style={[styles.timerText, timeLeft < 60 && styles.timerUrgent]}>
-            {formatTime(timeLeft)}
-          </Text>
+        <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
+          <View>
+            <Text style={styles.timerTitle}>Thời gian còn lại</Text>
+            <Text style={[styles.timerText, timeLeft < 60 && styles.timerUrgent]}>
+              {formatTime(timeLeft)}
+            </Text>
+          </View>
+          {violationCount > 0 && (
+            <View style={{ marginLeft: 16, backgroundColor: '#FEF2F2', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, borderWidth: 1, borderColor: '#FCA5A5' }}>
+              <Text style={{ color: '#EF4444', fontSize: 12, fontWeight: 'bold' }}>
+                ⚠️ Vi phạm: {violationCount}/{maxViolations}
+              </Text>
+            </View>
+          )}
         </View>
         <TouchableOpacity style={styles.submitBtn} onPress={openSubmitConfirmation}>
           <Text style={styles.submitBtnText}>Nộp bài</Text>
@@ -200,7 +226,7 @@ const TakeExamScreen = ({ navigation, route }) => {
         <Text style={styles.questionIndex}>Câu hỏi {currentIndex + 1}:</Text>
         <Text style={styles.questionText}>{currentQuestion.content}</Text>
 
-        {['A', 'B', 'C', 'D'].map((opt) => (
+        {(currentQuestion.displaySlots || ['A', 'B', 'C', 'D']).map((opt) => (
           <TouchableOpacity
             key={opt}
             style={[

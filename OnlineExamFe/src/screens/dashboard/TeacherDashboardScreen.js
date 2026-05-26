@@ -24,7 +24,7 @@ import TeacherScreenShell from '../../components/TeacherScreenShell';
 import TeacherReportContent from './TeacherReportContent';
 import { API_BASE_URL } from '../../config/api';
 import { useToast } from '../../context/ToastContext';
-import { clearAuthSession } from '../../services/authSession';
+import { clearAuthSession, loadAuthSession } from '../../services/authSession';
 import {
   copyTeacherExam,
   deleteTeacherExam,
@@ -128,7 +128,7 @@ const getExamStatusStyle = (item) => (
 
 const TeacherDashboardScreen = ({ route, navigation }) => {
   const { showToast } = useToast();
-  const user = route?.params?.user || null;
+  const user = route?.params?.user || loadAuthSession();
   const initialTab = route?.params?.initialTab;
 
   const getStartingTab = () => {
@@ -1097,7 +1097,7 @@ const TeacherDashboardScreen = ({ route, navigation }) => {
         contentContainerStyle={{ paddingTop: 0, paddingBottom: 24 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
-        <View className="mb-1">
+        <View className="mb-4">
           <Text className="mt-6 text-primary text-2xl font-bold tracking-tight mb-1">
             {activeTab === 'home'
               ? 'Tổng quan'

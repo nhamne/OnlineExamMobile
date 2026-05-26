@@ -659,7 +659,7 @@ app.post('/api/auth/login', async (req, res) => {
       `);
 
     if (result.recordset.length === 0) {
-      return res.status(401).json({ message: 'Invalid credentials.' });
+      return res.status(401).json({ message: 'Email không tồn tại trên hệ thống.' });
     }
 
     const user = result.recordset[0];
@@ -670,12 +670,10 @@ app.post('/api/auth/login', async (req, res) => {
     let isMatch = false;
     if (String(user.PasswordHash).startsWith('$2')) {
       isMatch = await bcrypt.compare(password, user.PasswordHash);
-    } else {
-      isMatch = password === user.PasswordHash;
     }
 
     if (!isMatch) {
-      return res.status(401).json({ message: 'Invalid credentials.' });
+      return res.status(401).json({ message: 'Sai mật khẩu. Hãy kiểm tra dấu cách hoặc in hoa.' });
     }
 
     if (dbRole && String(user.Role).toLowerCase() !== dbRole.toLowerCase()) {
@@ -691,6 +689,100 @@ app.post('/api/auth/login', async (req, res) => {
       message: 'Login success',
       user: sanitizeUser(user),
     });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+// Update user profile (fullName, email)
+app.put('/api/users/:id/profile', async (req, res) => {
+  try {
+    const userId = Number(req.params.id);
+    const { fullName, email } = req.body;
+
+    if (!userId || (!fullName && !email)) {
+      return res.status(400).json({ message: 'Invalid parameters.' });
+    }
+
+    const pool = await getPool();
+
+    // Check email uniqueness if email is changing
+    if (email) {
+      const existing = await pool
+        .request()
+        .input('email', sql.VarChar(255), String(email).trim().toLowerCase())
+        .input('id', sql.Int, userId)
+        .query('SELECT TOP 1 Id FROM Users WHERE Email = @email AND Id <> @id');
+
+      if (existing.recordset.length > 0) {
+        return res.status(409).json({ message: 'Email already in use by another account.' });
+      }
+    }
+
+    // Perform update
+    await pool
+      .request()
+      .input('id', sql.Int, userId)
+      .input('fullName', sql.NVarChar(255), fullName ? String(fullName).trim() : null)
+      .input('email', sql.VarChar(255), email ? String(email).trim().toLowerCase() : null)
+      .query(`
+        UPDATE Users
+        SET FullName = COALESCE(@fullName, FullName),
+            Email = COALESCE(@email, Email)
+        WHERE Id = @id
+      `);
+
+    const updated = await pool
+      .request()
+      .input('id', sql.Int, userId)
+      .query('SELECT TOP 1 Id, FullName, Email, Role FROM Users WHERE Id = @id');
+
+    if (updated.recordset.length === 0) return res.status(404).json({ message: 'User not found.' });
+
+    return res.json({ message: 'Profile updated', user: sanitizeUser(updated.recordset[0]) });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+// Change user password
+app.put('/api/users/:id/password', async (req, res) => {
+  try {
+    const userId = Number(req.params.id);
+    const { currentPassword, newPassword } = req.body;
+
+    if (!userId || !currentPassword || !newPassword) {
+      return res.status(400).json({ message: 'userId, currentPassword and newPassword are required.' });
+    }
+
+    if (String(newPassword).length < 6) {
+      return res.status(400).json({ message: 'New password must be at least 6 characters.' });
+    }
+
+    const pool = await getPool();
+    const result = await pool
+      .request()
+      .input('id', sql.Int, userId)
+      .query('SELECT TOP 1 Id, PasswordHash FROM Users WHERE Id = @id');
+
+    if (result.recordset.length === 0) return res.status(404).json({ message: 'User not found.' });
+
+    const user = result.recordset[0];
+    let isMatch = false;
+    if (String(user.PasswordHash).startsWith('$2')) {
+      isMatch = await bcrypt.compare(currentPassword, user.PasswordHash);
+    }
+
+    if (!isMatch) return res.status(401).json({ message: 'Current password is incorrect.' });
+
+    const newHash = await bcrypt.hash(newPassword, 10);
+    await pool
+      .request()
+      .input('id', sql.Int, userId)
+      .input('passwordHash', sql.VarChar(255), newHash)
+      .query('UPDATE Users SET PasswordHash = @passwordHash WHERE Id = @id');
+
+    return res.json({ message: 'Password updated.' });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
@@ -1669,6 +1761,7 @@ app.get('/api/dashboard/teacher/:userId/sessions/form-options', async (req, res)
         FROM ExamPapers ep
         WHERE ep.TeacherId = @teacherId
           AND ep.IsDeleted = 0
+          AND ep.IsDraft = 0
         ORDER BY ep.CreatedAt DESC, ep.Id DESC
       `);
 
@@ -2461,6 +2554,7 @@ app.get('/api/dashboard/student/:userId', async (req, res) => {
           es.StartTime,
           es.EndTime,
           es.DurationInMinutes,
+          CASE WHEN es.SessionPassword IS NOT NULL AND es.SessionPassword != '' THEN 1 ELSE 0 END AS HasPassword,
           c.ClassName,
           ep.Title AS ExamTitle,
           latestSubmission.AttemptId,
@@ -2577,6 +2671,14 @@ app.post('/api/exam/attempt/start/:sessionId', async (req, res) => {
     if (now < new Date(session.StartTime)) return res.status(403).json({ message: 'Ca thi chưa bắt đầu.' });
     if (now > new Date(session.EndTime)) return res.status(403).json({ message: 'Ca thi đã kết thúc.' });
 
+    // Validate password if session requires it
+    if (session.SessionPassword) {
+      const { password } = req.body;
+      if (!password || password !== session.SessionPassword) {
+        return res.status(403).json({ message: 'Mật khẩu ca thi không đúng.', requirePassword: true });
+      }
+    }
+
     if (!Number.isFinite(examDurationInMinutes) || examDurationInMinutes <= 0) {
       return res.status(500).json({ message: 'Thời lượng đề thi không hợp lệ.' });
     }
@@ -2623,7 +2725,11 @@ app.post('/api/exam/attempt/start/:sessionId', async (req, res) => {
         startedAt: submission.StartedAt,
         duration: examDurationInMinutes,
         examDurationInMinutes,
-        sessionDurationInMinutes
+        sessionDurationInMinutes,
+        isShuffled: Boolean(session.IsShuffled),
+        shuffleQuestions: Boolean(session.ShuffleQuestions),
+        shuffleAnswers: Boolean(session.ShuffleAnswers),
+        allowViewExplanation: Boolean(session.AllowViewExplanation)
       },
       questions: questions
     });
@@ -2958,6 +3064,7 @@ app.get('/api/exam/results/:attemptId/detail', async (req, res) => {
       .query(`
         SELECT 
           s.Score, s.CorrectAnswersCount,
+          es.IsShuffled, es.ShuffleQuestions, es.ShuffleAnswers, es.AllowViewExplanation,
           (SELECT COUNT(*) FROM Questions q WHERE q.ExamPaperId = es.ExamPaperId) as TotalQuestions,
           q.Id as questionId, q.Content, q.OptionA, q.OptionB, q.OptionC, q.OptionD, q.CorrectOption, q.Explanation,
           sd.SelectedOption
@@ -2975,6 +3082,10 @@ app.get('/api/exam/results/:attemptId/detail', async (req, res) => {
       score: first.Score,
       correctCount: first.CorrectAnswersCount,
       totalQuestions: first.TotalQuestions,
+      isShuffled: Boolean(first.IsShuffled),
+      shuffleQuestions: Boolean(first.ShuffleQuestions),
+      shuffleAnswers: Boolean(first.ShuffleAnswers),
+      allowViewExplanation: Boolean(first.AllowViewExplanation),
       questions: result.recordset.map(r => ({
         id: r.questionId,
         content: r.Content,
