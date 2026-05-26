@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Animated,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   SafeAreaView,
   ScrollView,
@@ -16,11 +16,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { login } from '../../services/authService';
 import { saveAuthSession } from '../../services/authSession';
-import {
-  authenticateBiometricLogin,
-  enableBiometricLogin,
-  getBiometricInfo,
-} from '../../services/biometricAuth';
+import { authenticateBiometricLogin, getBiometricInfo } from '../../services/biometricAuth';
 import RoleSegmentedControl from '../../components/RoleSegmentedControl';
 import { useToast } from '../../context/ToastContext';
 
@@ -48,8 +44,10 @@ const LoginScreen = ({ navigation }) => {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [biometricLoading, setBiometricLoading] = useState(false);
+  const [biometricAvailable, setBiometricAvailable] = useState(false);
   const [biometricEnabled, setBiometricEnabled] = useState(false);
   const [biometricLabel, setBiometricLabel] = useState('vân tay');
+  const [showBiometricPrompt, setShowBiometricPrompt] = useState(false);
   const slideAnim = useRef(new Animated.Value(0)).current;
   const { showToast } = useToast();
 
@@ -80,10 +78,12 @@ const LoginScreen = ({ navigation }) => {
         try {
           const info = await getBiometricInfo(role);
           if (!active) return;
+          setBiometricAvailable(info.available);
           setBiometricEnabled(info.available && info.enabled);
           setBiometricLabel(info.label || 'vân tay');
         } catch {
           if (!active) return;
+          setBiometricAvailable(false);
           setBiometricEnabled(false);
           setBiometricLabel('vân tay');
         }
@@ -107,39 +107,22 @@ const LoginScreen = ({ navigation }) => {
     navigation.replace('StudentDashboard', { user });
   }, [navigation]);
 
-  const promptEnableBiometric = useCallback(async (user) => {
-    if (Platform.OS === 'web') return;
-
-    try {
-      const info = await getBiometricInfo(user?.role);
-      if (!info.available || info.enabled) return;
-
-      Alert.alert(
-        'Bật đăng nhập sinh trắc học?',
-        `Bạn có muốn dùng ${info.label} để đăng nhập nhanh cho lần sau không?`,
-        [
-          { text: 'Để sau', style: 'cancel' },
-          {
-            text: 'Bật',
-            onPress: async () => {
-              try {
-                await enableBiometricLogin(user);
-                setBiometricEnabled(true);
-                setBiometricLabel(info.label || 'vân tay');
-                showToast(`Đã bật đăng nhập bằng ${info.label}.`, 'success');
-              } catch {
-                showToast('Không bật được đăng nhập sinh trắc học.', 'error');
-              }
-            },
-          },
-        ]
-      );
-    } catch {
-      // Ignore biometric prompt failures
-    }
-  }, [showToast]);
-
   const onBiometricLogin = async () => {
+    if (Platform.OS === 'web') {
+      showToast('Đăng nhập bằng vân tay chỉ hỗ trợ trên điện thoại.', 'warning');
+      return;
+    }
+
+    if (!biometricAvailable) {
+      showToast('Thiết bị này chưa sẵn sàng cho xác thực sinh trắc học.', 'warning');
+      return;
+    }
+
+    if (!biometricEnabled) {
+      setShowBiometricPrompt(true);
+      return;
+    }
+
     try {
       setBiometricLoading(true);
       const user = await authenticateBiometricLogin(role);
@@ -172,13 +155,11 @@ const LoginScreen = ({ navigation }) => {
       if (response?.user?.role === 'teacher') {
         saveAuthSession(response.user);
         showToast('Đăng nhập thành công. Chuyển tới dashboard giáo viên.', 'success');
-        promptEnableBiometric(response.user);
         await wait(300);
         navigateAfterLogin(response.user);
       } else if (response?.user?.role === 'student') {
         saveAuthSession(response.user);
         showToast('Đăng nhập thành công. Chuyển tới dashboard học sinh.', 'success');
-        promptEnableBiometric(response.user);
         await wait(300);
         navigateAfterLogin(response.user);
       } else {
@@ -233,7 +214,10 @@ const LoginScreen = ({ navigation }) => {
                 <Text className="mt-4 text-sm font-semibold tracking-wide text-on-surface-variant mb-1">
                   Email
                 </Text>
-                <View className="flex-row items-center bg-surface-container-highest rounded-xl px-4 h-14 border" style={{ borderColor: '#c1c6d680' }}>
+                <View
+                  className="flex-row items-center bg-surface-container-highest rounded-xl px-4 h-14 border"
+                  style={{ borderColor: '#c1c6d680' }}
+                >
                   <MaterialIcons name="mail-outline" size={20} color="#727785" />
                   <TextInput
                     className="flex-1 ml-3 text-on-surface font-body text-base"
@@ -253,7 +237,10 @@ const LoginScreen = ({ navigation }) => {
                 <Text className="text-sm font-semibold tracking-wide text-on-surface-variant mb-1">
                   Mật khẩu
                 </Text>
-                <View className="flex-row items-center bg-surface-container-highest rounded-xl px-4 h-14 border" style={{ borderColor: '#c1c6d680' }}>
+                <View
+                  className="flex-row items-center bg-surface-container-highest rounded-xl px-4 h-14 border"
+                  style={{ borderColor: '#c1c6d680' }}
+                >
                   <MaterialIcons name="lock-outline" size={20} color="#727785" />
                   <TextInput
                     className="flex-1 ml-3 text-on-surface font-body text-base"
@@ -283,7 +270,10 @@ const LoginScreen = ({ navigation }) => {
                 >
                   <View
                     className="w-5 h-5 border-2 rounded flex items-center justify-center"
-                    style={{ backgroundColor: rememberMe ? '#005bbf' : 'transparent', borderColor: rememberMe ? '#005bbf' : '#c1c6d6' }}
+                    style={{
+                      backgroundColor: rememberMe ? '#005bbf' : 'transparent',
+                      borderColor: rememberMe ? '#005bbf' : '#c1c6d6',
+                    }}
                   >
                     {rememberMe && <MaterialIcons name="check" size={14} color="white" />}
                   </View>
@@ -308,7 +298,7 @@ const LoginScreen = ({ navigation }) => {
                 )}
               </TouchableOpacity>
 
-              {biometricEnabled && (
+              {Platform.OS !== 'web' && (
                 <View className="items-center mb-8">
                   <TouchableOpacity
                     onPress={onBiometricLogin}
@@ -319,15 +309,20 @@ const LoginScreen = ({ navigation }) => {
                       borderRadius: 28,
                       alignItems: 'center',
                       justifyContent: 'center',
-                      backgroundColor: '#EAF2FF',
+                      backgroundColor: biometricEnabled ? '#EAF2FF' : '#F1F5F9',
                       borderWidth: 1,
-                      borderColor: '#BFD7FF',
+                      borderColor: biometricEnabled ? '#BFD7FF' : '#CBD5E1',
+                      opacity: biometricLoading ? 0.75 : 1,
                     }}
                   >
                     {biometricLoading ? (
                       <ActivityIndicator color="#005bbf" />
                     ) : (
-                      <MaterialIcons name="fingerprint" size={28} color="#005bbf" />
+                      <MaterialIcons
+                        name="fingerprint"
+                        size={28}
+                        color={biometricEnabled ? '#005bbf' : '#94A3B8'}
+                      />
                     )}
                   </TouchableOpacity>
                 </View>
@@ -343,6 +338,40 @@ const LoginScreen = ({ navigation }) => {
           </View>
           <View style={{ flex: 1, minHeight: 40 }} />
         </ScrollView>
+
+        <Modal
+          visible={showBiometricPrompt}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setShowBiometricPrompt(false)}
+        >
+          <View className="flex-1 bg-black/40 items-center justify-center px-6">
+            <View className="w-full max-w-[360px] bg-white rounded-3xl px-5 py-6 border border-slate-100">
+              <View className="items-center mb-4">
+                <View
+                  className="w-14 h-14 rounded-full items-center justify-center"
+                  style={{ backgroundColor: '#EAF2FF' }}
+                >
+                  <MaterialIcons name="fingerprint" size={28} color="#005bbf" />
+                </View>
+              </View>
+
+              <Text className="text-xl font-black text-on-surface text-center mb-2">
+                Chưa bật đăng nhập vân tay
+              </Text>
+              <Text className="text-sm text-on-surface-variant text-center leading-6 mb-6">
+                Hãy vào Thông tin tài khoản và bật đăng nhập bằng vân tay trước khi sử dụng.
+              </Text>
+
+              <TouchableOpacity
+                className="h-12 rounded-2xl bg-primary items-center justify-center"
+                onPress={() => setShowBiometricPrompt(false)}
+              >
+                <Text className="text-white font-bold text-base">Đã hiểu</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );

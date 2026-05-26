@@ -5,6 +5,7 @@ import {
   Platform,
   RefreshControl,
   ScrollView,
+  Switch,
   Text,
   TouchableOpacity,
   View,
@@ -32,6 +33,11 @@ import { setAttempt } from '../../store/useExamStore';
 import { COLORS } from '../../constants/theme';
 import StudentResultsContent from './StudentResultsContent';
 import * as Clipboard from 'expo-clipboard';
+import {
+  disableBiometricLogin,
+  enableBiometricLogin,
+  getBiometricInfo,
+} from '../../services/biometricAuth';
 
 const ambientShadow = Platform.OS === 'ios'
   ? { shadowColor: '#005bbf', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.06, shadowRadius: 12 }
@@ -280,6 +286,9 @@ const StudentDashboardScreen = ({ route, navigation }) => {
   const [newPwd, setNewPwd] = useState('');
   const [confirmPwd, setConfirmPwd] = useState('');
   const [changingPwd, setChangingPwd] = useState(false);
+  const [biometricAvailable, setBiometricAvailable] = useState(false);
+  const [biometricEnabled, setBiometricEnabled] = useState(false);
+  const [biometricSaving, setBiometricSaving] = useState(false);
 
   const initials = useMemo(() => {
     const fullName = user?.fullName || '';
@@ -318,6 +327,29 @@ const StudentDashboardScreen = ({ route, navigation }) => {
       loadData();
       return () => {};
     }, [loadData])
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+
+      (async () => {
+        try {
+          const info = await getBiometricInfo('student');
+          if (!active) return;
+          setBiometricAvailable(info.available);
+          setBiometricEnabled(info.enabled);
+        } catch {
+          if (!active) return;
+          setBiometricAvailable(false);
+          setBiometricEnabled(false);
+        }
+      })();
+
+      return () => {
+        active = false;
+      };
+    }, [])
   );
 
   useEffect(() => {
@@ -511,6 +543,41 @@ const StudentDashboardScreen = ({ route, navigation }) => {
     setJoinModalVisible(false);
   };
 
+  const handleToggleBiometric = async () => {
+    if (Platform.OS === 'web') {
+      showToast('Đăng nhập bằng vân tay chỉ hỗ trợ trên điện thoại.', 'warning');
+      return;
+    }
+
+    if (biometricSaving) return;
+
+    setBiometricSaving(true);
+    try {
+      if (biometricEnabled) {
+        await disableBiometricLogin('student');
+        setBiometricEnabled(false);
+        showToast('Đã tắt đăng nhập bằng vân tay cho học sinh.', 'success');
+        return;
+      }
+
+      const info = await getBiometricInfo('student');
+      if (!info.available) {
+        setBiometricAvailable(false);
+        showToast('Thiết bị này chưa sẵn sàng cho xác thực sinh trắc học.', 'warning');
+        return;
+      }
+
+      await enableBiometricLogin({ ...user, role: 'student' });
+      setBiometricAvailable(true);
+      setBiometricEnabled(true);
+      showToast('Đã bật đăng nhập bằng vân tay cho học sinh.', 'success');
+    } catch {
+      showToast('Không thể cập nhật đăng nhập bằng vân tay.', 'error');
+    } finally {
+      setBiometricSaving(false);
+    }
+  };
+
   const renderClasses = () => (
     <View>
       {/* Join Section */}
@@ -681,6 +748,35 @@ const StudentDashboardScreen = ({ route, navigation }) => {
           <ProfileRow icon="badge" label="Vai trò" value="Học sinh" />
           <ProfileRow icon="school" label="Trạng thái" value="Đang học" />
         </View>
+
+          <View className="flex-row items-center justify-between py-3">
+            <View className="flex-row items-center flex-1 pr-3">
+              <MaterialIcons name="fingerprint" size={20} color="#64748B" />
+              <View className="ml-2 flex-1">
+                <Text className="text-on-surface-variant">Đăng nhập bằng vân tay</Text>
+                <Text className="text-xs text-on-surface-variant mt-1">
+                {Platform.OS === 'web'
+                  ? 'Chỉ hỗ trợ trên điện thoại'
+                  : biometricAvailable
+                    ? 'Bật để dùng icon vân tay ở màn đăng nhập'
+                    : 'Thiết bị chưa sẵn sàng cho sinh trắc học'}
+              </Text>
+            </View>
+          </View>
+            <View className="items-end justify-center" style={{ width: 52, minHeight: 32 }}>
+              {biometricSaving ? (
+                <ActivityIndicator size="small" color={biometricEnabled ? '#15803D' : '#64748B'} />
+              ) : (
+                <Switch
+                  value={biometricEnabled}
+                  onValueChange={handleToggleBiometric}
+                  trackColor={{ false: '#CBD5E1', true: '#93C5FD' }}
+                  thumbColor={biometricEnabled ? '#005BBF' : '#F8FAFC'}
+                  ios_backgroundColor="#CBD5E1"
+                />
+              )}
+            </View>
+          </View>
 
         <View className="mt-5 flex-row gap-3">
           <TouchableOpacity
