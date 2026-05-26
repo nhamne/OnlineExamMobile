@@ -17,7 +17,6 @@ import ExamDetailScreen from '../screens/teacher/ExamDetailScreen';
 import TakeExamScreen from '../screens/TakeExamScreen';
 import StatisticsScreen from '../screens/StatisticsScreen';
 import StudentExamDetailScreen from '../screens/StudentExamDetailScreen';
-import StudentResultsScreen from '../screens/StudentResultsScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -40,7 +39,6 @@ const linking = {
 			StudentDashboard: 'student',
 			TakeExam: 'student/take-exam',
 			StudentStatistics: 'student/statistics',
-			StudentResults: 'student/results',
 			StudentExamDetail: 'student/exam-detail/:attemptId',
 		},
 	},
@@ -115,7 +113,6 @@ const AppNavigator = ({ initialRouteName = 'Login', initialUser = null }) => {
 				/>
 				<Stack.Screen name="TakeExam" component={TakeExamScreen} />
 				<Stack.Screen name="StudentStatistics" component={StatisticsScreen} />
-				<Stack.Screen name="StudentResults" component={StudentResultsScreen} />
 				<Stack.Screen name="StudentExamDetail" component={StudentExamDetailScreen} />
 			</Stack.Navigator>
 		</NavigationContainer>

@@ -31,7 +31,9 @@ import {
   deleteTeacherSession,
   getTeacherDashboard,
   getTeacherSessionFormOptions,
+  updateTeacherExam,
   updateTeacherSession,
+  globalSearch,
 } from '../../services/authService';
 
 const bottomNavItems = [
@@ -128,7 +130,7 @@ const getExamStatusStyle = (item) => (
 
 const TeacherDashboardScreen = ({ route, navigation }) => {
   const { showToast } = useToast();
-  const user = route?.params?.user || loadAuthSession();
+  const user = route?.params?.user?.id ? route?.params?.user : loadAuthSession();
   const initialTab = route?.params?.initialTab;
 
   const getStartingTab = () => {
@@ -369,7 +371,7 @@ const TeacherDashboardScreen = ({ route, navigation }) => {
 
   const onOpenSessionManagement = useCallback(
     (session) => {
-      navigation.navigate('TeacherSessionManagement', {
+      navigation.navigate('TeacherSessionManagement', { sessionId: session?.Id || session?.id || item?.Id || item?.id,
         user: displayTeacher || user,
         session,
       });
@@ -655,29 +657,40 @@ const TeacherDashboardScreen = ({ route, navigation }) => {
     }
   };
 
-  const filterKeyword = searchText.trim().toLowerCase();
-  const filteredClassrooms = useMemo(
-    () =>
-      classrooms.filter((item) =>
-        `${item.ClassName || ''} ${item.JoinCode || ''}`.toLowerCase().includes(filterKeyword)
-      ),
-    [classrooms, filterKeyword]
-  );
+  useEffect(() => {
+    const timer = setTimeout(async () => {
+      if (!searchText.trim()) {
+        if (!loading) {
+          await loadData();
+        }
+      } else {
+        try {
+          setLoading(true);
+          const [resC, resE, resS] = await Promise.all([
+            globalSearch('classrooms', searchText.trim(), user?.id),
+            globalSearch('exampapers', searchText.trim(), user?.id),
+            globalSearch('examsessions', searchText.trim(), user?.id),
+          ]);
+          setClassrooms(resC.results || []);
+          setExamPapers(resE.results || []);
+          setSessions(resS.results || []);
+          
+          if (resC.fallback || resE.fallback || resS.fallback) {
+            showToast('Meilisearch không hoạt động. Đang dùng tìm kiếm thường.', 'warning');
+          }
+        } catch (err) {
+          console.error('Search error:', err);
+        } finally {
+          setLoading(false);
+        }
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [searchText, user?.id]);
 
-  const filteredExamPapers = useMemo(
-    () => examPapers.filter((item) => `${item.Title || ''}`.toLowerCase().includes(filterKeyword)),
-    [examPapers, filterKeyword]
-  );
-
-  const filteredSessions = useMemo(
-    () =>
-      sessions.filter((item) =>
-        `${item.SessionName || ''} ${item.ClassName || ''} ${item.ExamTitle || ''}`
-          .toLowerCase()
-          .includes(filterKeyword)
-      ),
-    [sessions, filterKeyword]
-  );
+  const filteredClassrooms = classrooms;
+  const filteredExamPapers = examPapers;
+  const filteredSessions = sessions;
 
   const renderSummaryCards = () => (
     <View className="flex-col mb-10">
@@ -796,7 +809,7 @@ const TeacherDashboardScreen = ({ route, navigation }) => {
                   closeExamMenu();
                   return;
                 }
-                navigation.navigate('TeacherExamDetail', { exam: item, user: displayTeacher || user });
+                navigation.navigate('TeacherExamDetail', { examId: item?.Id || item?.id, exam: item, user: displayTeacher || user });
               }}
             >
               <View style={stylesExam.cardHeader}>
@@ -861,7 +874,7 @@ const TeacherDashboardScreen = ({ route, navigation }) => {
 
               <View style={stylesExam.cardFooter}>
                 <TouchableOpacity
-                  onPress={() => navigation.navigate('TeacherExamDetail', { exam: item, user: displayTeacher || user })}
+                  onPress={() => navigation.navigate('TeacherExamDetail', { examId: item?.Id || item?.id, exam: item, user: displayTeacher || user })}
                 >
                   <Text style={stylesExam.actionText}>Chi tiết -&gt;</Text>
                 </TouchableOpacity>
@@ -1069,6 +1082,7 @@ const TeacherDashboardScreen = ({ route, navigation }) => {
         upcomingCount={summary?.UpcomingSessionCount}
         initials={initials}
         onPressAvatar={onPressAvatar}
+        hideSearch={true}
       >
         <View className="flex-1 items-center justify-center px-4" style={{ minHeight: 0 }}>
           <ActivityIndicator size="large" color="#005bbf" />
@@ -1088,6 +1102,7 @@ const TeacherDashboardScreen = ({ route, navigation }) => {
       upcomingCount={summary?.UpcomingSessionCount}
       initials={initials}
       onPressAvatar={onPressAvatar}
+      hideSearch={activeTab === 'home' || activeTab === 'reports'}
     >
       <ScrollView
         style={{ flex: 1, minHeight: 0 }}

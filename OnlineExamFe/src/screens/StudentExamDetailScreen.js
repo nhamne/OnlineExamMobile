@@ -86,7 +86,7 @@ const StudentExamDetailScreen = ({ route, navigation }) => {
     return (
       <SafeAreaView className="flex-1 bg-surface-container-lowest justify-center items-center">
         <Text className="text-on-surface-variant text-center">Không tìm thấy thông tin chi tiết bài làm.</Text>
-        <TouchableOpacity onPress={() => navigation.goBack()} className="mt-4 px-4 py-2 bg-surface-container-high rounded-xl">
+        <TouchableOpacity onPress={() => navigation.canGoBack() ? navigation.goBack() : navigation.replace('StudentDashboard', { activeMenu: 'results' })} className="mt-4 px-4 py-2 bg-surface-container-high rounded-xl">
           <Text className="text-primary font-bold">Quay lại</Text>
         </TouchableOpacity>
       </SafeAreaView>
@@ -164,7 +164,7 @@ const StudentExamDetailScreen = ({ route, navigation }) => {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+        <TouchableOpacity style={styles.backButton} onPress={() => navigation.canGoBack() ? navigation.goBack() : navigation.replace('StudentDashboard', { activeMenu: 'results' })}>
           <MaterialIcons name="arrow-back" size={20} color={COLORS.primary} />
         </TouchableOpacity>
         <View style={styles.headerTitleContainer}>

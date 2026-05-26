@@ -95,7 +95,7 @@ const StudentResultsScreen = ({ navigation, route }) => {
         <View className="py-5">
           <TouchableOpacity
             className="flex-row items-center mb-3"
-            onPress={() => navigation.goBack()}
+            onPress={() => navigation.canGoBack() ? navigation.goBack() : navigation.replace('StudentDashboard')}
           >
             <MaterialIcons name="arrow-back" size={20} color={COLORS.primary} />
             <Text className="text-primary font-bold ml-1">Quay lại</Text>

@@ -1,3 +1,4 @@
+import { loadAuthSession } from '../../services/authSession';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -27,6 +28,7 @@ import {
   getTeacherSessions,
   previewTeacherSession,
   updateTeacherSession,
+  globalSearch,
 } from '../../services/authService';
 
 const bottomNavItems = [
@@ -194,7 +196,7 @@ const buildSessionQrImageUrl = (session) => {
 
 const SessionScreen = ({ route, navigation }) => {
   const { showToast } = useToast();
-  const user = route?.params?.user || null;
+  const user = route?.params?.user?.id ? route?.params?.user : loadAuthSession();
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -486,7 +488,7 @@ const SessionScreen = ({ route, navigation }) => {
 
   const onOpenSessionManagement = useCallback(
     (session) => {
-      navigation.navigate('TeacherSessionManagement', {
+      navigation.navigate('TeacherSessionManagement', { sessionId: session?.Id || session?.id || item?.Id || item?.id,
         user: displayTeacher || user,
         session,
       });
@@ -494,23 +496,31 @@ const SessionScreen = ({ route, navigation }) => {
     [displayTeacher, navigation, user]
   );
 
-  const filteredSessions = useMemo(() => {
-    const keyword = searchText.trim().toLowerCase();
-    return sessions.filter((item) => {
-      const haystack = [
-        item?.SessionName,
-        item?.ClassName,
-        item?.JoinCode,
-        item?.ExamTitle,
-        item?.SessionPassword,
-        item?.Notes,
-      ]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase();
-      return haystack.includes(keyword);
-    });
-  }, [searchText, sessions]);
+  useEffect(() => {
+    const timer = setTimeout(async () => {
+      if (!searchText.trim()) {
+        if (!loading) {
+          await loadData();
+        }
+      } else {
+        try {
+          setLoading(true);
+          const res = await globalSearch('examsessions', searchText.trim(), user?.id);
+          setSessions(res.results || []);
+          if (res.fallback) {
+            showToast('Meilisearch không hoạt động. Đang dùng tìm kiếm thường.', 'warning');
+          }
+        } catch (err) {
+          console.error('Search error:', err);
+        } finally {
+          setLoading(false);
+        }
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [searchText, user?.id]);
+
+  const filteredSessions = sessions;
 
   const selectedExam = useMemo(
     () => formOptions.examPapers.find((item) => item.Id === formState.examPaperId) || null,

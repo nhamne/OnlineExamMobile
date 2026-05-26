@@ -1,3 +1,4 @@
+import { loadAuthSession } from '../../services/authSession';
 import React, { useRef, useState } from 'react';
 import {
   SafeAreaView,
@@ -29,7 +30,7 @@ const COLORS = {
 const ManualExamForm = ({ navigation, route }) => {
   const { showToast } = useToast();
   const insets = useSafeAreaInsets();
-  const user = route?.params?.user || null;
+  const user = route?.params?.user?.id ? route?.params?.user : loadAuthSession();
   const questions = Array.isArray(route?.params?.questions) ? route.params.questions : [];
   const [title, setTitle] = useState('');
   const [subject, setSubject] = useState('');
@@ -124,7 +125,7 @@ const ManualExamForm = ({ navigation, route }) => {
   return (
     <SafeAreaView style={styles.container}>
       <View style={[styles.header, { paddingTop: Math.max(insets.top, Platform.OS === 'android' ? (StatusBar.currentHeight || 0) : 0) }]}>
-        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+        <TouchableOpacity style={styles.backButton} onPress={() => navigation.canGoBack() ? navigation.goBack() : navigation.replace('TeacherDashboard', { user, initialTab: 'exams' })}>
           <MaterialIcons name="arrow-back" size={20} color={COLORS.primary} />
         </TouchableOpacity>
         <View style={styles.headerTitleContainer}>

@@ -1,3 +1,4 @@
+import { loadAuthSession } from '../../services/authSession';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   Alert,
@@ -103,7 +104,7 @@ const QuestionItem = ({
 export default function AIOCRScreen({ navigation, route }) {
   const { showToast } = useToast();
   const insets = useSafeAreaInsets();
-  const user = route?.params?.user || null;
+  const user = route?.params?.user?.id ? route?.params?.user : loadAuthSession();
   const [selectedFile, setSelectedFile] = useState(null);
   const [extractedQuestions, setExtractedQuestions] = useState([]);
   const [editableQuestions, setEditableQuestions] = useState([]);
@@ -303,7 +304,7 @@ export default function AIOCRScreen({ navigation, route }) {
   return (
     <SafeAreaView style={styles.container}>
       <View style={[styles.header, { paddingTop: Math.max(insets.top, Platform.OS === 'android' ? (StatusBar.currentHeight || 0) : 0) }]}>
-        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+        <TouchableOpacity style={styles.backButton} onPress={() => navigation.canGoBack() ? navigation.goBack() : navigation.replace('TeacherDashboard', { user, initialTab: 'exams' })}>
           <MaterialIcons name="arrow-back" size={20} color={COLORS.primary} />
         </TouchableOpacity>
         <View style={styles.headerTitleContainer}>

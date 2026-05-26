@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { ActivityIndicator, ScrollView, Text, TouchableOpacity, View, Modal, TextInput } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import TeacherScreenShell from '../../components/TeacherScreenShell';
-import { clearAuthSession } from '../../services/authSession';
+import { loadAuthSession,  clearAuthSession } from '../../services/authSession';
 import { useToast } from '../../context/ToastContext';
 import { updateUserProfile, changeUserPassword } from '../../services/authService';
 
@@ -16,7 +16,7 @@ const bottomNavItems = [
 
 const TeacherProfileScreen = ({ route, navigation }) => {
   const { showToast } = useToast();
-  const user = route?.params?.user || null;
+  const user = route?.params?.user?.id ? route?.params?.user : loadAuthSession();
 
   const initials = useMemo(() => {
     const fullName = user?.fullName || '';
@@ -72,6 +72,7 @@ const TeacherProfileScreen = ({ route, navigation }) => {
       upcomingCount={0}
       initials={initials}
       onPressAvatar={() => {}}
+      hideSearch={true}
     >
       <ScrollView className="flex-1 px-8" contentContainerStyle={{ paddingTop: 16, paddingBottom: 28 }}>
         <View className="mt-2 mb-5">

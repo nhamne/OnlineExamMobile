@@ -11,7 +11,7 @@ import {
 import { MaterialIcons } from '@expo/vector-icons';
 import { getExams } from '../../services/authService';
 import { COLORS } from '../../constants/theme';
-import { clearAuthSession } from '../../services/authSession';
+import { loadAuthSession,  clearAuthSession } from '../../services/authSession';
 
 const ExamItem = ({ item }) => {
   return (
@@ -42,7 +42,7 @@ const ExamItem = ({ item }) => {
 };
 
 const HomeScreen = ({ route, navigation }) => {
-  const user = route.params?.user;
+  const user = route?.params?.user?.id ? route?.params?.user : loadAuthSession();
   const [exams, setExams] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);

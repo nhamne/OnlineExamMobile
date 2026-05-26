@@ -15,6 +15,7 @@ const {
   HeadingLevel,
 } = require('docx');
 require('dotenv').config();
+const { searchIndex, syncDocument, deleteDocument } = require('./services/meilisearchService');
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
@@ -562,6 +563,204 @@ app.get('/api/health', async (_req, res) => {
     res.json({ ok: true, message: 'Database connected' });
   } catch (error) {
     res.status(500).json({ ok: false, message: error.message });
+  }
+});
+
+// Meilisearch global search proxy
+app.get('/api/search', async (req, res) => {
+  try {
+    const { index, q, teacherId, studentId } = req.query;
+    if (!index || !q) {
+      return res.json({ results: [] });
+    }
+
+    const pool = await getPool();
+    let isFallback = false;
+    let query = '';
+    let dbResult;
+    let sortedResults = [];
+
+    try {
+      const searchResult = await searchIndex(index, q, { limit: 50, matchingStrategy: 'all' });
+      const hits = searchResult.hits || [];
+      
+      if (hits.length === 0) {
+        return res.json({ results: [] });
+      }
+
+      const ids = hits.map(h => h.id);
+      
+      if (index === 'examsessions') {
+        if (studentId) {
+          query = `
+            SELECT
+              es.Id,
+              es.SessionName,
+              es.StartTime,
+              es.EndTime,
+              es.DurationInMinutes,
+              CASE WHEN es.SessionPassword IS NOT NULL AND es.SessionPassword != '' THEN 1 ELSE 0 END AS HasPassword,
+              c.ClassName,
+              ep.Title AS ExamTitle,
+              t.FullName as TeacherName,
+              latestSubmission.AttemptId,
+              latestSubmission.Status AS SubmissionStatus,
+              latestSubmission.SubmittedAt,
+              latestSubmission.StartedAt AS AttemptStartedAt
+            FROM ExamSessions es
+            INNER JOIN ClassroomMembers cm ON cm.ClassroomId = es.ClassroomId
+            INNER JOIN Classrooms c ON c.Id = es.ClassroomId
+            INNER JOIN ExamPapers ep ON ep.Id = es.ExamPaperId
+            LEFT JOIN Users t ON c.TeacherId = t.Id
+            OUTER APPLY (
+              SELECT TOP 1 s.Id AS AttemptId, s.Status, s.SubmittedAt, s.StartedAt
+              FROM Submissions s
+              WHERE s.ExamSessionId = es.Id
+                AND s.StudentId = ${Number(studentId)}
+              ORDER BY ISNULL(s.SubmittedAt, s.StartedAt) DESC, s.Id DESC
+            ) AS latestSubmission
+            WHERE es.Id IN (${ids.join(',')})
+              AND cm.StudentId = ${Number(studentId)}
+              AND c.IsDeleted = 0
+              AND ep.IsDeleted = 0
+              AND es.IsDeleted = 0
+          `;
+        } else {
+          query = `
+            SELECT es.*, c.ClassName, ep.Title as ExamPaperTitle,
+            (SELECT COUNT(*) FROM Submissions WHERE ExamSessionId = es.Id AND Status > 0) as SubmittedCount
+            FROM ExamSessions es
+            LEFT JOIN Classrooms c ON es.ClassroomId = c.Id
+            LEFT JOIN ExamPapers ep ON es.ExamPaperId = ep.Id
+            WHERE es.Id IN (${ids.join(',')})
+            ${teacherId ? `AND c.TeacherId = ${Number(teacherId)}` : ''}
+            AND es.IsDeleted = 0
+          `;
+        }
+      } else if (index === 'exampapers') {
+        query = `
+          SELECT * FROM ExamPapers
+          WHERE Id IN (${ids.join(',')})
+          ${teacherId ? `AND TeacherId = ${Number(teacherId)}` : ''}
+          AND IsDeleted = 0
+        `;
+      } else if (index === 'classrooms') {
+        if (studentId) {
+          query = `
+            SELECT c.*, t.FullName as TeacherName
+            FROM Classrooms c
+            INNER JOIN ClassroomMembers cm ON cm.ClassroomId = c.Id
+            LEFT JOIN Users t ON c.TeacherId = t.Id
+            WHERE c.Id IN (${ids.join(',')})
+              AND cm.StudentId = ${Number(studentId)}
+              AND c.IsDeleted = 0
+          `;
+        } else {
+          query = `
+            SELECT c.*, 
+              (SELECT COUNT(*) FROM ClassroomMembers WHERE ClassroomId = c.Id) as StudentCount
+            FROM Classrooms c
+            WHERE Id IN (${ids.join(',')})
+            ${teacherId ? `AND TeacherId = ${Number(teacherId)}` : ''}
+            AND IsDeleted = 0
+          `;
+        }
+      }
+
+      dbResult = await pool.request().query(query);
+      sortedResults = dbResult.recordset.sort((a, b) => {
+        return ids.indexOf(a.Id) - ids.indexOf(b.Id);
+      });
+
+    } catch (meilisearchError) {
+      console.error('Meilisearch fallback triggered:', meilisearchError.message);
+      isFallback = true;
+      const safeQ = q.replace(/'/g, "''"); // escape SQL single quotes
+
+      if (index === 'examsessions') {
+        if (studentId) {
+          query = `
+            SELECT
+              es.Id,
+              es.SessionName,
+              es.StartTime,
+              es.EndTime,
+              es.DurationInMinutes,
+              CASE WHEN es.SessionPassword IS NOT NULL AND es.SessionPassword != '' THEN 1 ELSE 0 END AS HasPassword,
+              c.ClassName,
+              ep.Title AS ExamTitle,
+              t.FullName as TeacherName,
+              latestSubmission.AttemptId,
+              latestSubmission.Status AS SubmissionStatus,
+              latestSubmission.SubmittedAt,
+              latestSubmission.StartedAt AS AttemptStartedAt
+            FROM ExamSessions es
+            INNER JOIN ClassroomMembers cm ON cm.ClassroomId = es.ClassroomId
+            INNER JOIN Classrooms c ON c.Id = es.ClassroomId
+            INNER JOIN ExamPapers ep ON ep.Id = es.ExamPaperId
+            LEFT JOIN Users t ON c.TeacherId = t.Id
+            OUTER APPLY (
+              SELECT TOP 1 s.Id AS AttemptId, s.Status, s.SubmittedAt, s.StartedAt
+              FROM Submissions s
+              WHERE s.ExamSessionId = es.Id
+                AND s.StudentId = ${Number(studentId)}
+              ORDER BY ISNULL(s.SubmittedAt, s.StartedAt) DESC, s.Id DESC
+            ) AS latestSubmission
+            WHERE cm.StudentId = ${Number(studentId)}
+              AND c.IsDeleted = 0
+              AND ep.IsDeleted = 0
+              AND es.IsDeleted = 0
+              AND (es.SessionName LIKE N'%${safeQ}%' OR c.ClassName LIKE N'%${safeQ}%' OR ep.Title LIKE N'%${safeQ}%' OR c.JoinCode LIKE N'%${safeQ}%')
+          `;
+        } else {
+          query = `
+            SELECT es.*, c.ClassName, ep.Title as ExamPaperTitle,
+            (SELECT COUNT(*) FROM Submissions WHERE ExamSessionId = es.Id AND Status > 0) as SubmittedCount
+            FROM ExamSessions es
+            LEFT JOIN Classrooms c ON es.ClassroomId = c.Id
+            LEFT JOIN ExamPapers ep ON es.ExamPaperId = ep.Id
+            WHERE es.IsDeleted = 0
+            ${teacherId ? `AND c.TeacherId = ${Number(teacherId)}` : ''}
+            AND (es.SessionName LIKE N'%${safeQ}%' OR c.ClassName LIKE N'%${safeQ}%' OR ep.Title LIKE N'%${safeQ}%' OR c.JoinCode LIKE N'%${safeQ}%')
+          `;
+        }
+      } else if (index === 'exampapers') {
+        query = `
+          SELECT * FROM ExamPapers
+          WHERE IsDeleted = 0
+          ${teacherId ? `AND TeacherId = ${Number(teacherId)}` : ''}
+          AND (Title LIKE N'%${safeQ}%' OR Subject LIKE N'%${safeQ}%')
+        `;
+      } else if (index === 'classrooms') {
+        if (studentId) {
+          query = `
+            SELECT c.*, t.FullName as TeacherName
+            FROM Classrooms c
+            INNER JOIN ClassroomMembers cm ON cm.ClassroomId = c.Id
+            LEFT JOIN Users t ON c.TeacherId = t.Id
+            WHERE cm.StudentId = ${Number(studentId)}
+              AND c.IsDeleted = 0
+              AND (c.ClassName LIKE N'%${safeQ}%' OR c.JoinCode LIKE N'%${safeQ}%')
+          `;
+        } else {
+          query = `
+            SELECT c.*, 
+              (SELECT COUNT(*) FROM ClassroomMembers WHERE ClassroomId = c.Id) as StudentCount
+            FROM Classrooms c
+            WHERE IsDeleted = 0
+            ${teacherId ? `AND TeacherId = ${Number(teacherId)}` : ''}
+            AND (c.ClassName LIKE N'%${safeQ}%' OR c.JoinCode LIKE N'%${safeQ}%')
+          `;
+        }
+      }
+
+      dbResult = await pool.request().query(query);
+      sortedResults = dbResult.recordset;
+    }
+
+    return res.json({ results: sortedResults, fallback: isFallback });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
   }
 });
 
@@ -1207,6 +1406,19 @@ app.post('/api/dashboard/teacher/:userId/classrooms', async (req, res) => {
       `);
 
     const classroom = createdResult.recordset[0];
+
+    try {
+      await syncDocument('classrooms', {
+        id: classroom.Id,
+        ClassName: classroom.ClassName,
+        JoinCode: classroom.JoinCode,
+        TeacherId: classroom.TeacherId,
+        IsDeleted: 0
+      });
+    } catch (syncErr) {
+      console.error('Meilisearch sync error:', syncErr);
+    }
+
     return res.status(201).json({
       message: 'Tạo lớp học thành công.',
       classroom: {
@@ -1273,6 +1485,18 @@ app.put('/api/dashboard/teacher/:userId/classrooms/:classroomId', async (req, re
     }
 
     const classroom = updatedResult.recordset[0];
+
+    try {
+      await syncDocument('classrooms', {
+        id: classroom.Id,
+        ClassName: classroom.ClassName,
+        JoinCode: classroom.JoinCode,
+        TeacherId: classroom.TeacherId,
+        IsDeleted: 0
+      });
+    } catch (syncErr) {
+      console.error('Meilisearch sync error:', syncErr);
+    }
 
     const studentCountResult = await pool
       .request()

@@ -1,3 +1,4 @@
+import { loadAuthSession } from '../../services/authSession';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -56,7 +57,7 @@ const getSubmissionStatusText = (value) => {
 
 const SessionManagementScreen = ({ route, navigation }) => {
   const { showToast } = useToast();
-  const user = route?.params?.user || null;
+  const user = route?.params?.user?.id ? route?.params?.user : loadAuthSession();
   const sessionParam = route?.params?.session || null;
   const sessionId = sessionParam?.Id || route?.params?.sessionId || null;
 
@@ -200,7 +201,7 @@ const SessionManagementScreen = ({ route, navigation }) => {
     <SafeAreaView style={styles.container}>
       {/* Header matching ExamDetail style */}
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+        <TouchableOpacity style={styles.backButton} onPress={() => navigation.canGoBack() ? navigation.goBack() : navigation.replace('TeacherSessions')}>
           <MaterialIcons name="arrow-back" size={20} color={COLORS.primary} />
         </TouchableOpacity>
         <View style={styles.headerTitleContainer}>

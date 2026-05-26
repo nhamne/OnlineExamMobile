@@ -126,7 +126,7 @@ const ExamDetailScreen = ({ route, navigation }) => {
       <View className="bg-primary px-6 pt-10 pb-8 rounded-b-[40px] shadow-lg">
         <TouchableOpacity
           className="w-9 h-9 rounded-full bg-white/20 items-center justify-center mb-4"
-          onPress={() => navigation.goBack()}
+          onPress={() => navigation.canGoBack() ? navigation.goBack() : navigation.replace('StudentDashboard')}
         >
           <MaterialIcons name="arrow-back" size={20} color="#FFFFFF" />
         </TouchableOpacity>

@@ -225,3 +225,10 @@ export async function changeUserPassword(userId, currentPassword, newPassword) {
   const response = await api.put(`/api/users/${userId}/password`, { currentPassword, newPassword });
   return response.data;
 }
+
+export async function globalSearch(index, query, teacherId = null) {
+  let url = `/api/search?index=${index}&q=${encodeURIComponent(query)}`;
+  if (teacherId) url += `&teacherId=${teacherId}`;
+  const response = await api.get(url);
+  return response.data;
+}

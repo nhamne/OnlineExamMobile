@@ -1,3 +1,4 @@
+import { loadAuthSession } from '../../services/authSession';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -34,7 +35,7 @@ const COLORS = {
 
 const ClassroomManagementScreen = ({ route, navigation }) => {
   const { showToast } = useToast();
-  const user = route?.params?.user || null;
+  const user = route?.params?.user?.id ? route?.params?.user : loadAuthSession();
   const classroomParam = route?.params?.classroom || null;
 
   const [loading, setLoading] = useState(true);
@@ -138,7 +139,7 @@ const ClassroomManagementScreen = ({ route, navigation }) => {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+        <TouchableOpacity style={styles.backButton} onPress={() => navigation.canGoBack() ? navigation.goBack() : navigation.replace('TeacherClassrooms')}>
           <MaterialIcons name="arrow-back" size={20} color={COLORS.primary} />
         </TouchableOpacity>
         <View style={styles.headerTitleContainer}>

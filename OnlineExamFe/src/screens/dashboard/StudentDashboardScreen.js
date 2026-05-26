@@ -22,6 +22,7 @@ import {
   examApi,
   updateUserProfile,
   changeUserPassword,
+  globalSearch,
 } from '../../services/authService';
 import BottomSidebarNav from '../../components/BottomSidebarNav';
 import DashboardTopBar from '../../components/DashboardTopBar';
@@ -245,7 +246,7 @@ const RecentSessionCard = ({ item, onPress }) => {
 };
 
 const StudentDashboardScreen = ({ route, navigation }) => {
-  const user = route.params?.user || loadAuthSession();
+  const user = route?.params?.user?.id ? route?.params?.user : loadAuthSession();
   const dispatch = useDispatch();
   const { showToast } = useToast();
   
@@ -255,7 +256,7 @@ const StudentDashboardScreen = ({ route, navigation }) => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
-  const [activeMenu, setActiveMenu] = useState('home');
+  const [activeMenu, setActiveMenu] = useState(route?.params?.activeMenu || 'home');
   const [searchText, setSearchText] = useState('');
   
   // Join classroom state
@@ -436,16 +437,36 @@ const StudentDashboardScreen = ({ route, navigation }) => {
     startExamWithPassword(pendingSession, sessionPassword);
   };
 
-  const filterKeyword = searchText.trim().toLowerCase();
-  const filteredSessions = useMemo(
-    () =>
-      sessions.filter((item) =>
-        `${item.SessionName || ''} ${item.ClassName || ''} ${item.ExamTitle || ''}`
-          .toLowerCase()
-          .includes(filterKeyword)
-      ),
-    [sessions, filterKeyword]
-  );
+  useEffect(() => {
+    const timer = setTimeout(async () => {
+      if (!searchText.trim()) {
+        if (!loading) {
+          await loadData();
+        }
+      } else {
+        try {
+          setLoading(true);
+          const [resC, resS] = await Promise.all([
+            globalSearch('classrooms', searchText.trim(), null, user?.id),
+            globalSearch('examsessions', searchText.trim(), null, user?.id),
+          ]);
+          setClassrooms(resC.results || []);
+          setSessions(resS.results || []);
+
+          if (resC.fallback || resS.fallback) {
+            showToast('Meilisearch không hoạt động. Đang dùng tìm kiếm thường.', 'warning');
+          }
+        } catch (err) {
+          console.error('Search error:', err);
+        } finally {
+          setLoading(false);
+        }
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [searchText, user?.id]);
+
+  const filteredSessions = sessions;
 
   const renderOverview = () => (
     <>
@@ -823,6 +844,7 @@ const StudentDashboardScreen = ({ route, navigation }) => {
         upcomingCount={summary?.UpcomingSessionCount}
         initials={initials}
         onPressAvatar={() => setActiveMenu('profile')}
+        hideSearch={activeMenu === 'home' || activeMenu === 'results' || activeMenu === 'profile'}
       />
 
       <ScrollView

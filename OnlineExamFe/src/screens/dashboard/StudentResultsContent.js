@@ -4,11 +4,14 @@ import {
   Text,
   TouchableOpacity,
   View,
+  TextInput,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import examApi from '../../api/exam.api';
+import { globalSearch } from '../../services/authService';
 import { COLORS } from '../../constants/theme';
 import { StyleSheet } from 'react-native';
+import { useToast } from '../../context/ToastContext';
 
 const formatDateTime = (value) => {
   if (!value) return '--';
@@ -33,8 +36,11 @@ const styles = StyleSheet.create({
 });
 
 const StudentResultsContent = ({ userId, onSelectAttempt }) => {
+  const { showToast } = useToast();
   const [loading, setLoading] = useState(true);
   const [results, setResults] = useState([]);
+  const [filteredResults, setFilteredResults] = useState([]);
+  const [searchText, setSearchText] = useState('');
   const [error, setError] = useState('');
 
   const loadResults = useCallback(async () => {
@@ -47,7 +53,9 @@ const StudentResultsContent = ({ userId, onSelectAttempt }) => {
     try {
       setError('');
       const response = await examApi.getStudentResults(userId);
-      setResults(Array.isArray(response?.data) ? response.data : []);
+      const data = Array.isArray(response?.data) ? response.data : [];
+      setResults(data);
+      setFilteredResults(data);
     } catch (err) {
       setError(err?.response?.data?.message || 'Không tải được kết quả thi.');
     }
@@ -61,6 +69,26 @@ const StudentResultsContent = ({ userId, onSelectAttempt }) => {
     })();
   }, [loadResults]);
 
+  useEffect(() => {
+    const timer = setTimeout(async () => {
+      if (!searchText.trim()) {
+        setFilteredResults(results);
+        return;
+      }
+      try {
+        const searchRes = await globalSearch('examsessions', searchText.trim(), null, userId);
+        const sessionIds = (searchRes.results || []).map((s) => s.Id);
+        setFilteredResults(results.filter(r => sessionIds.includes(r.ExamSessionId)));
+        if (searchRes.fallback) {
+          showToast('Meilisearch không hoạt động. Đang dùng tìm kiếm thường.', 'warning');
+        }
+      } catch (err) {
+        console.error('Search results error:', err);
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [searchText, results, userId]);
+
   const summary = useMemo(() => {
     const submittedCount = results.filter((item) => Number(item.Status) === 1).length;
     const avgScoreBase = results.filter((item) => Number(item.Status) === 1);
@@ -69,23 +97,29 @@ const StudentResultsContent = ({ userId, onSelectAttempt }) => {
       : 0;
 
     return {
-      total: results.length,
+      total: filteredResults.length,
       submittedCount,
       avgScore,
     };
-  }, [results]);
-
-  if (loading) {
-    return (
-      <View className="py-12 items-center justify-center">
-        <ActivityIndicator size="large" color={COLORS.primary} />
-        <Text className="text-on-surface-variant mt-2">Đang tải kết quả thi...</Text>
-      </View>
-    );
-  }
+  }, [filteredResults]);
 
   return (
     <View className="mb-10">
+      <View className="flex-row items-center bg-white px-4 py-2 rounded-2xl mb-6 shadow-sm border border-outline-variant">
+        <MaterialIcons name="search" size={24} color="#64748b" />
+        <TextInput
+          className="flex-1 ml-3 text-base text-on-surface py-2"
+          placeholder="Tìm kiếm theo tên ca thi, môn học..."
+          placeholderTextColor="#94a3b8"
+          value={searchText}
+          onChangeText={setSearchText}
+        />
+        {searchText.length > 0 && (
+          <TouchableOpacity onPress={() => setSearchText('')} className="p-1">
+            <MaterialIcons name="close" size={20} color="#64748b" />
+          </TouchableOpacity>
+        )}
+      </View>
       <View className="flex-row gap-3 mb-6">
         <View className="flex-1 bg-white rounded-2xl p-4" style={styles.ambientShadow}>
           <Text className="text-xs text-on-surface-variant font-bold uppercase">Tổng bài</Text>
@@ -109,14 +143,19 @@ const StudentResultsContent = ({ userId, onSelectAttempt }) => {
 
       <Text className="text-xl font-bold text-on-surface mb-4">Lịch sử bài làm</Text>
 
-      {results.length === 0 ? (
+      {loading ? (
+        <View className="py-12 items-center justify-center">
+          <ActivityIndicator size="large" color={COLORS.primary} />
+          <Text className="text-on-surface-variant mt-2">Đang tải kết quả thi...</Text>
+        </View>
+      ) : filteredResults.length === 0 ? (
         <View className="bg-surface-container-lowest rounded-2xl p-8 items-center" style={styles.ambientShadow}>
           <MaterialIcons name="assignment-late" size={46} color="#cbd5e1" />
-          <Text className="text-on-surface-variant mt-2 font-medium">Chưa có kết quả thi nào.</Text>
+          <Text className="text-on-surface-variant mt-2 font-medium">Không tìm thấy kết quả phù hợp.</Text>
         </View>
       ) : (
         <View className="flex-col gap-3">
-          {results.map((item) => {
+          {filteredResults.map((item) => {
             const isSubmitted = Number(item.Status) === 1;
             const badgeBg = isSubmitted ? '#dcfce7' : '#fee2e2';
             const badgeText = isSubmitted ? '#166534' : '#b91c1c';

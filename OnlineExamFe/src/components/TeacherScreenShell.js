@@ -17,6 +17,7 @@ const TeacherScreenShell = ({
   upcomingCount,
   initials,
   onPressAvatar,
+  hideSearch = false,
 }) => {
   return (
     <SafeAreaView
@@ -31,6 +32,7 @@ const TeacherScreenShell = ({
         upcomingCount={upcomingCount}
         initials={initials}
         onPressAvatar={onPressAvatar}
+        hideSearch={hideSearch}
       />
 
       <View style={{ flex: 1, minHeight: 0, paddingBottom: BOTTOM_NAV_HEIGHT }}>{children}</View>

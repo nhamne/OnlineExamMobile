@@ -1,3 +1,4 @@
+import { loadAuthSession } from '../../services/authSession';
 import React, { useMemo, useRef, useState } from 'react';
 import {
   Alert,
@@ -124,7 +125,7 @@ const buildTextFromQuestions = (questions) => {
 
 const ExamEditorContent = ({ navigation, route }) => {
   const insets = useSafeAreaInsets();
-  const user = route?.params?.user || null;
+  const user = route?.params?.user?.id ? route?.params?.user : loadAuthSession();
   const [inputText, setInputText] = useState('');
   const editorRef = useRef(null);
 

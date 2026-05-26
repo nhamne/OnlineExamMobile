@@ -1,3 +1,4 @@
+import { loadAuthSession } from '../../services/authSession';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
@@ -156,7 +157,7 @@ export default function ExamDetailScreen({ navigation, route }) {
   const { showToast } = useToast();
   const insets = useSafeAreaInsets();
   const routeExam = route?.params?.exam || null;
-  const user = route?.params?.user || null;
+  const user = route?.params?.user?.id ? route?.params?.user : loadAuthSession();
   const examId = routeExam?.Id || routeExam?.id || route?.params?.examId || null;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -638,7 +639,7 @@ export default function ExamDetailScreen({ navigation, route }) {
       originalExamRef.current = result?.examPaper || exam || originalExamRef.current;
       showToast('Đã cập nhật đề thi.', 'success');
       allowExitRef.current = true;
-      navigation.goBack();
+      navigation.canGoBack() ? navigation.goBack() : navigation.replace('TeacherDashboard');
     } catch (err) {
       showToast(err?.response?.data?.message || 'Không thể cập nhật đề thi.', 'error');
     } finally {
@@ -648,7 +649,7 @@ export default function ExamDetailScreen({ navigation, route }) {
   return (
     <SafeAreaView style={styles.container}>
       <View style={[styles.header, { paddingTop: Math.max(insets.top, Platform.OS === 'android' ? (StatusBar.currentHeight || 0) : 0) }]}>
-        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+        <TouchableOpacity style={styles.backButton} onPress={() => navigation.canGoBack() ? navigation.goBack() : navigation.replace('TeacherDashboard')}>
           <MaterialIcons name="arrow-back" size={20} color={COLORS.primary} />
         </TouchableOpacity>
         <View style={styles.headerTitleContainer}>

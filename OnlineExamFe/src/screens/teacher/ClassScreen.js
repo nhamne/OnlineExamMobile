@@ -1,3 +1,4 @@
+import { loadAuthSession } from '../../services/authSession';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -21,11 +22,12 @@ import {
   deleteTeacherClassroom,
   getTeacherClassrooms,
   updateTeacherClassroom,
+  globalSearch,
 } from '../../services/authService';
 
 const ClassScreen = ({ route, navigation }) => {
   const { showToast } = useToast();
-  const user = route?.params?.user || null;
+  const user = route?.params?.user?.id ? route?.params?.user : loadAuthSession();
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -111,13 +113,31 @@ const ClassScreen = ({ route, navigation }) => {
     setRefreshing(false);
   }, [loadData]);
 
-  const filteredClassrooms = useMemo(() => {
-    const keyword = searchText.trim().toLowerCase();
-    return classrooms.filter((item) => {
-      const haystack = `${item.ClassName || ''} ${item.JoinCode || ''}`;
-      return haystack.toLowerCase().includes(keyword);
-    });
-  }, [classrooms, searchText]);
+  useEffect(() => {
+    const timer = setTimeout(async () => {
+      if (!searchText.trim()) {
+        if (!loading) {
+          await loadData();
+        }
+      } else {
+        try {
+          setLoading(true);
+          const res = await globalSearch('classrooms', searchText.trim(), user?.id);
+          setClassrooms(res.results || []);
+          if (res.fallback) {
+            showToast('Meilisearch không hoạt động. Đang dùng tìm kiếm thường.', 'warning');
+          }
+        } catch (err) {
+          console.error('Search error:', err);
+        } finally {
+          setLoading(false);
+        }
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [searchText, user?.id]);
+
+  const filteredClassrooms = classrooms;
 
   const formatDate = (value) => {
     if (!value) return '--';
@@ -136,7 +156,7 @@ const ClassScreen = ({ route, navigation }) => {
       return;
     }
 
-    navigation.navigate('TeacherClassroomManagement', {
+    navigation.navigate('TeacherClassroomManagement', { classroomId: item?.Id || item?.id,
       user,
       classroom: item,
     });

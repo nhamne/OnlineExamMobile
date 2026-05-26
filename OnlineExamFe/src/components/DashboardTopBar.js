@@ -10,6 +10,7 @@ const DashboardTopBar = ({
   upcomingCount = 0,
   initials = '--',
   onPressAvatar,
+  hideSearch = false,
 }) => {
   const insets = useSafeAreaInsets();
   const topInset = Platform.OS === 'android'
@@ -25,16 +26,20 @@ const DashboardTopBar = ({
         paddingBottom: 12,
       }}
     >
-      <View className="flex-1 flex-row items-center bg-surface-container-high rounded-full px-4 h-10 mr-4">
-        <MaterialIcons name="search" size={20} color="#414754" />
-        <TextInput
-          className="flex-1 ml-2 text-sm text-on-surface font-medium"
-          placeholder={searchPlaceholder}
-          placeholderTextColor="#727785"
-          value={searchText}
-          onChangeText={onChangeSearch}
-        />
-      </View>
+      {hideSearch ? (
+        <View className="flex-1 mr-4" />
+      ) : (
+        <View className="flex-1 flex-row items-center bg-surface-container-high rounded-full px-4 h-10 mr-4">
+          <MaterialIcons name="search" size={20} color="#414754" />
+          <TextInput
+            className="flex-1 ml-2 text-sm text-on-surface font-medium"
+            placeholder={searchPlaceholder}
+            placeholderTextColor="#727785"
+            value={searchText}
+            onChangeText={onChangeSearch}
+          />
+        </View>
+      )}
 
       <View className="flex-row items-center">
         <TouchableOpacity className="relative">
