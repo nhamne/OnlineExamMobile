@@ -188,7 +188,7 @@ const ExamEditorContent = ({ navigation, route }) => {
   return (
     <SafeAreaView style={styles.container}>
       <View style={[styles.header, { paddingTop: Math.max(insets.top, Platform.OS === 'android' ? (StatusBar.currentHeight || 0) : 0) }]}>
-        <TouchableOpacity style={styles.backButton} onPress={() => navigation.replace('TeacherDashboard', { initialTab: 'exams' })}>
+        <TouchableOpacity style={styles.backButton} onPress={() => navigation.replace('TeacherDashboard', { user, initialTab: 'exams' })}>
           <MaterialIcons name="arrow-back" size={20} color={COLORS.primary} />
         </TouchableOpacity>
         <View style={styles.headerTitleContainer}>

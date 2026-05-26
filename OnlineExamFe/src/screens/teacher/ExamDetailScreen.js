@@ -639,7 +639,7 @@ export default function ExamDetailScreen({ navigation, route }) {
       originalExamRef.current = result?.examPaper || exam || originalExamRef.current;
       showToast('Đã cập nhật đề thi.', 'success');
       allowExitRef.current = true;
-      navigation.canGoBack() ? navigation.goBack() : navigation.replace('TeacherDashboard');
+      navigation.canGoBack() ? navigation.goBack() : navigation.replace('TeacherDashboard', { user, initialTab: 'exams' });
     } catch (err) {
       showToast(err?.response?.data?.message || 'Không thể cập nhật đề thi.', 'error');
     } finally {
@@ -649,7 +649,7 @@ export default function ExamDetailScreen({ navigation, route }) {
   return (
     <SafeAreaView style={styles.container}>
       <View style={[styles.header, { paddingTop: Math.max(insets.top, Platform.OS === 'android' ? (StatusBar.currentHeight || 0) : 0) }]}>
-        <TouchableOpacity style={styles.backButton} onPress={() => navigation.canGoBack() ? navigation.goBack() : navigation.replace('TeacherDashboard')}>
+        <TouchableOpacity style={styles.backButton} onPress={() => navigation.canGoBack() ? navigation.goBack() : navigation.replace('TeacherDashboard', { user, initialTab: 'exams' })}>
           <MaterialIcons name="arrow-back" size={20} color={COLORS.primary} />
         </TouchableOpacity>
         <View style={styles.headerTitleContainer}>
