@@ -65224,7 +65224,6 @@ __d(function (global, require, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, expor
         /**
          * Switches Fiber creation to a simple object instead of a constructor.
          */
-
         var enableObjectFiber = false;
         var enableTransitionTracing = false; // FB-only usage. The new API has different semantics.
 
