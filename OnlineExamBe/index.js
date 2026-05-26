@@ -4,6 +4,7 @@ const fs = require('fs/promises');
 const path = require('path');
 const bcrypt = require('bcryptjs');
 const sql = require('mssql');
+const { syncDocument, deleteDocument, searchIndex } = require('./services/meilisearchService');
 require('dotenv').config({ override: true });
 const multer = require('multer');
 
@@ -542,6 +543,101 @@ app.post('/api/ai-ocr/parse', upload.single('file'), async (req, res) => {
   }
 });
 
+const nodemailer = require('nodemailer');
+const otpCache = new Map();
+
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+});
+
+app.post('/api/auth/forgot-password/send-otp', async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ message: 'Email is required.' });
+    }
+
+    const pool = await getPool();
+    const existing = await pool
+      .request()
+      .input('email', sql.VarChar(255), String(email).trim().toLowerCase())
+      .query('SELECT TOP 1 Id FROM Users WHERE Email = @email');
+
+    if (existing.recordset.length === 0) {
+      return res.status(404).json({ message: 'Email không tồn tại trong hệ thống.' });
+    }
+
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    otpCache.set(email.toLowerCase(), {
+      otp,
+      expiresAt: Date.now() + 5 * 60 * 1000, // 5 phút
+    });
+
+    const mailOptions = {
+      from: process.env.EMAIL_USER,
+      to: email,
+      subject: 'Mã xác nhận quên mật khẩu',
+      text: `Mã xác nhận (OTP) của bạn là: ${otp}\n\nMã này sẽ hết hạn trong 5 phút.`,
+    };
+
+    await transporter.sendMail(mailOptions);
+
+    return res.json({ message: 'OTP sent successfully.' });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'Failed to send OTP.' });
+  }
+});
+
+app.post('/api/auth/reset-password', async (req, res) => {
+  try {
+    const { email, otp, newPassword } = req.body;
+
+    if (!email || !otp || !newPassword) {
+      return res.status(400).json({ message: 'Missing required fields.' });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({ message: 'Mật khẩu mới phải có ít nhất 6 ký tự.' });
+    }
+
+    const cached = otpCache.get(email.toLowerCase());
+    if (!cached) {
+      return res.status(400).json({ message: 'Mã OTP không hợp lệ hoặc bạn chưa yêu cầu gửi mã.' });
+    }
+
+    if (Date.now() > cached.expiresAt) {
+      otpCache.delete(email.toLowerCase());
+      return res.status(400).json({ message: 'Mã OTP đã hết hạn.' });
+    }
+
+    if (cached.otp !== otp) {
+      return res.status(400).json({ message: 'Mã OTP không chính xác.' });
+    }
+
+    // Xóa OTP sau khi dùng
+    otpCache.delete(email.toLowerCase());
+
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+    const pool = await getPool();
+
+    await pool
+      .request()
+      .input('email', sql.VarChar(255), String(email).trim().toLowerCase())
+      .input('passwordHash', sql.VarChar(255), passwordHash)
+      .query('UPDATE Users SET PasswordHash = @passwordHash WHERE Email = @email');
+
+    return res.json({ message: 'Password reset successfully.' });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'Failed to reset password.' });
+  }
+});
+
 app.post('/api/ai-explain', async (req, res) => {
   try {
     const {
@@ -980,101 +1076,6 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
-const nodemailer = require('nodemailer');
-const otpCache = new Map();
-
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-});
-
-app.post('/api/auth/forgot-password/send-otp', async (req, res) => {
-  try {
-    const { email } = req.body;
-    if (!email) {
-      return res.status(400).json({ message: 'Email is required.' });
-    }
-
-    const pool = await getPool();
-    const existing = await pool
-      .request()
-      .input('email', sql.VarChar(255), String(email).trim().toLowerCase())
-      .query('SELECT TOP 1 Id FROM Users WHERE Email = @email');
-
-    if (existing.recordset.length === 0) {
-      return res.status(404).json({ message: 'Email không tồn tại trong hệ thống.' });
-    }
-
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    otpCache.set(email.toLowerCase(), {
-      otp,
-      expiresAt: Date.now() + 5 * 60 * 1000, // 5 phút
-    });
-
-    const mailOptions = {
-      from: process.env.EMAIL_USER,
-      to: email,
-      subject: 'Mã xác nhận quên mật khẩu',
-      text: `Mã xác nhận (OTP) của bạn là: ${otp}\n\nMã này sẽ hết hạn trong 5 phút.`,
-    };
-
-    await transporter.sendMail(mailOptions);
-
-    return res.json({ message: 'OTP sent successfully.' });
-  } catch (error) {
-    console.error(error);
-    return res.status(500).json({ message: 'Failed to send OTP.' });
-  }
-});
-
-app.post('/api/auth/reset-password', async (req, res) => {
-  try {
-    const { email, otp, newPassword } = req.body;
-
-    if (!email || !otp || !newPassword) {
-      return res.status(400).json({ message: 'Missing required fields.' });
-    }
-
-    if (newPassword.length < 6) {
-      return res.status(400).json({ message: 'Mật khẩu mới phải có ít nhất 6 ký tự.' });
-    }
-
-    const cached = otpCache.get(email.toLowerCase());
-    if (!cached) {
-      return res.status(400).json({ message: 'Mã OTP không hợp lệ hoặc bạn chưa yêu cầu gửi mã.' });
-    }
-
-    if (Date.now() > cached.expiresAt) {
-      otpCache.delete(email.toLowerCase());
-      return res.status(400).json({ message: 'Mã OTP đã hết hạn.' });
-    }
-
-    if (cached.otp !== otp) {
-      return res.status(400).json({ message: 'Mã OTP không chính xác.' });
-    }
-
-    // Xóa OTP sau khi dùng
-    otpCache.delete(email.toLowerCase());
-
-    const passwordHash = await bcrypt.hash(newPassword, 10);
-    const pool = await getPool();
-
-    await pool
-      .request()
-      .input('email', sql.VarChar(255), String(email).trim().toLowerCase())
-      .input('passwordHash', sql.VarChar(255), passwordHash)
-      .query('UPDATE Users SET PasswordHash = @passwordHash WHERE Email = @email');
-
-    return res.json({ message: 'Password reset successfully.' });
-  } catch (error) {
-    console.error(error);
-    return res.status(500).json({ message: 'Failed to reset password.' });
-  }
-});
-
 app.get('/api/exams', async (_req, res) => {
   try {
     const pool = await getPool();
@@ -1396,6 +1397,610 @@ app.post('/api/dashboard/teacher/:userId/exams', async (req, res) => {
         console.error('Rollback failed', rollbackError);
       }
     }
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+app.get('/api/dashboard/teacher/:userId/exams/:examId', async (req, res) => {
+  try {
+    const userId = Number(req.params.userId);
+    const examId = Number(req.params.examId);
+
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({ message: 'Invalid userId.' });
+    }
+
+    if (!Number.isInteger(examId) || examId <= 0) {
+      return res.status(400).json({ message: 'Invalid examId.' });
+    }
+
+    const pool = await getPool();
+
+    const teacherCheck = await pool
+      .request()
+      .input('teacherId', sql.Int, userId)
+      .query(`
+        SELECT TOP 1 Id
+        FROM Users
+        WHERE Id = @teacherId AND Role = 'Teacher'
+      `);
+
+    if (teacherCheck.recordset.length === 0) {
+      return res.status(404).json({ message: 'Teacher not found.' });
+    }
+
+    const examResult = await pool
+      .request()
+      .input('teacherId', sql.Int, userId)
+      .input('examId', sql.Int, examId)
+      .query(`
+        SELECT TOP 1
+          ep.Id,
+          ep.Title,
+          ep.Subject,
+          ep.DurationInMinutes,
+          ep.CreatedAt,
+          ep.IsDraft,
+          (SELECT COUNT(*) FROM Questions q WHERE q.ExamPaperId = ep.Id) AS QuestionCount
+        FROM ExamPapers ep
+        WHERE ep.Id = @examId
+          AND ep.TeacherId = @teacherId
+          AND ep.IsDeleted = 0
+      `);
+
+    if (examResult.recordset.length === 0) {
+      return res.status(404).json({ message: 'Exam paper not found or not owned by teacher.' });
+    }
+
+    const questionsResult = await pool
+      .request()
+      .input('examId', sql.Int, examId)
+      .query(`
+        SELECT
+          q.Id,
+          q.Content,
+          q.OptionA,
+          q.OptionB,
+          q.OptionC,
+          q.OptionD,
+          q.CorrectOption
+        FROM Questions q
+        WHERE q.ExamPaperId = @examId
+        ORDER BY q.Id ASC
+      `);
+
+    return res.json({
+      examPaper: examResult.recordset[0],
+      questions: questionsResult.recordset,
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+app.delete('/api/dashboard/teacher/:userId/exams/:examId/questions/:questionId', async (req, res) => {
+  try {
+    const userId = Number(req.params.userId);
+    const examId = Number(req.params.examId);
+    const questionId = Number(req.params.questionId);
+
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({ message: 'Invalid userId.' });
+    }
+
+    if (!Number.isInteger(examId) || examId <= 0) {
+      return res.status(400).json({ message: 'Invalid examId.' });
+    }
+
+    if (!Number.isInteger(questionId) || questionId <= 0) {
+      return res.status(400).json({ message: 'Invalid questionId.' });
+    }
+
+    const pool = await getPool();
+
+    const examCheck = await pool
+      .request()
+      .input('teacherId', sql.Int, userId)
+      .input('examId', sql.Int, examId)
+      .query(`
+        SELECT TOP 1 Id
+        FROM ExamPapers
+        WHERE Id = @examId AND TeacherId = @teacherId AND IsDeleted = 0
+      `);
+
+    if (examCheck.recordset.length === 0) {
+      return res.status(404).json({ message: 'Exam paper not found or not owned by teacher.' });
+    }
+
+    const deleteResult = await pool
+      .request()
+      .input('questionId', sql.Int, questionId)
+      .input('examId', sql.Int, examId)
+      .query(`
+        DELETE FROM Questions
+        WHERE Id = @questionId AND ExamPaperId = @examId
+      `);
+
+    if (deleteResult.rowsAffected[0] === 0) {
+      return res.status(404).json({ message: 'Question not found.' });
+    }
+
+    return res.json({ ok: true });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+app.post('/api/dashboard/teacher/:userId/exams/:examId/questions', async (req, res) => {
+  try {
+    const userId = Number(req.params.userId);
+    const examId = Number(req.params.examId);
+    const content = String(req.body?.content || '').trim();
+    const optionA = String(req.body?.optionA || '').trim();
+    const optionB = String(req.body?.optionB || '').trim();
+    const optionC = String(req.body?.optionC || '').trim();
+    const optionD = String(req.body?.optionD || '').trim();
+    const correctOption = String(req.body?.correctOption || '').trim().toUpperCase();
+
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({ message: 'Invalid userId.' });
+    }
+
+    if (!Number.isInteger(examId) || examId <= 0) {
+      return res.status(400).json({ message: 'Invalid examId.' });
+    }
+
+    if (!content) {
+      return res.status(400).json({ message: 'Nội dung câu hỏi là bắt buộc.' });
+    }
+
+    if (!optionA || !optionB || !optionC || !optionD) {
+      return res.status(400).json({ message: 'Vui lòng nhập đủ 4 đáp án.' });
+    }
+
+    if (!['A', 'B', 'C', 'D'].includes(correctOption)) {
+      return res.status(400).json({ message: 'Đáp án đúng không hợp lệ.' });
+    }
+
+    const pool = await getPool();
+
+    const examCheck = await pool
+      .request()
+      .input('teacherId', sql.Int, userId)
+      .input('examId', sql.Int, examId)
+      .query(`
+        SELECT TOP 1 Id
+        FROM ExamPapers
+        WHERE Id = @examId AND TeacherId = @teacherId AND IsDeleted = 0
+      `);
+
+    if (examCheck.recordset.length === 0) {
+      return res.status(404).json({ message: 'Exam paper not found or not owned by teacher.' });
+    }
+
+    const insertResult = await pool
+      .request()
+      .input('examId', sql.Int, examId)
+      .input('content', sql.NVarChar(sql.MAX), content)
+      .input('optionA', sql.NVarChar(sql.MAX), optionA)
+      .input('optionB', sql.NVarChar(sql.MAX), optionB)
+      .input('optionC', sql.NVarChar(sql.MAX), optionC)
+      .input('optionD', sql.NVarChar(sql.MAX), optionD)
+      .input('correctOption', sql.Char(1), correctOption)
+      .query(`
+        INSERT INTO Questions (ExamPaperId, Content, OptionA, OptionB, OptionC, OptionD, CorrectOption)
+        OUTPUT INSERTED.Id, INSERTED.ExamPaperId, INSERTED.Content, INSERTED.OptionA, INSERTED.OptionB, INSERTED.OptionC, INSERTED.OptionD, INSERTED.CorrectOption
+        VALUES (@examId, @content, @optionA, @optionB, @optionC, @optionD, @correctOption)
+      `);
+
+    return res.status(201).json({ question: insertResult.recordset[0] });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+app.put('/api/dashboard/teacher/:userId/exams/:examId', async (req, res) => {
+  try {
+    const userId = Number(req.params.userId);
+    const examId = Number(req.params.examId);
+    const title = String(req.body?.title || '').trim();
+    const subject = String(req.body?.subject || '').trim();
+    const durationInMinutes = Number(req.body?.durationInMinutes);
+    const isDraft = Boolean(req.body?.isDraft);
+
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({ message: 'Invalid userId.' });
+    }
+
+    if (!Number.isInteger(examId) || examId <= 0) {
+      return res.status(400).json({ message: 'Invalid examId.' });
+    }
+
+    if (!title) {
+      return res.status(400).json({ message: 'Tên đề thi là bắt buộc.' });
+    }
+
+    if (!subject) {
+      return res.status(400).json({ message: 'Môn học là bắt buộc.' });
+    }
+
+    if (!Number.isFinite(durationInMinutes) || durationInMinutes <= 0) {
+      return res.status(400).json({ message: 'Thời gian thi không hợp lệ.' });
+    }
+
+    const pool = await getPool();
+
+    const examCheck = await pool
+      .request()
+      .input('teacherId', sql.Int, userId)
+      .input('examId', sql.Int, examId)
+      .query(`
+        SELECT TOP 1 Id
+        FROM ExamPapers
+        WHERE Id = @examId AND TeacherId = @teacherId AND IsDeleted = 0
+      `);
+
+    if (examCheck.recordset.length === 0) {
+      return res.status(404).json({ message: 'Exam paper not found or not owned by teacher.' });
+    }
+
+    const updateResult = await pool
+      .request()
+      .input('examId', sql.Int, examId)
+      .input('title', sql.NVarChar(255), title)
+      .input('subject', sql.NVarChar(255), subject)
+      .input('duration', sql.Int, durationInMinutes)
+      .input('isDraft', sql.Bit, isDraft)
+      .query(`
+        UPDATE ExamPapers
+        SET Title = @title,
+            Subject = @subject,
+            DurationInMinutes = @duration,
+            IsDraft = @isDraft
+        WHERE Id = @examId
+      `);
+
+    if (updateResult.rowsAffected[0] === 0) {
+      return res.status(500).json({ message: 'Không thể cập nhật đề thi.' });
+    }
+
+    const examResult = await pool
+      .request()
+      .input('examId', sql.Int, examId)
+      .query(`
+        SELECT TOP 1
+          ep.Id,
+          ep.Title,
+          ep.Subject,
+          ep.DurationInMinutes,
+          ep.CreatedAt,
+          ep.IsDraft,
+          (SELECT COUNT(*) FROM Questions q WHERE q.ExamPaperId = ep.Id) AS QuestionCount
+        FROM ExamPapers ep
+        WHERE ep.Id = @examId
+      `);
+
+    return res.json({ examPaper: examResult.recordset[0] });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+app.put('/api/dashboard/teacher/:userId/exams/:examId/questions/:questionId', async (req, res) => {
+  try {
+    const userId = Number(req.params.userId);
+    const examId = Number(req.params.examId);
+    const questionId = Number(req.params.questionId);
+    const content = String(req.body?.content || '').trim();
+    const optionA = String(req.body?.optionA || '').trim();
+    const optionB = String(req.body?.optionB || '').trim();
+    const optionC = String(req.body?.optionC || '').trim();
+    const optionD = String(req.body?.optionD || '').trim();
+    const correctOption = String(req.body?.correctOption || '').trim().toUpperCase();
+
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({ message: 'Invalid userId.' });
+    }
+
+    if (!Number.isInteger(examId) || examId <= 0) {
+      return res.status(400).json({ message: 'Invalid examId.' });
+    }
+
+    if (!Number.isInteger(questionId) || questionId <= 0) {
+      return res.status(400).json({ message: 'Invalid questionId.' });
+    }
+
+    if (!content) {
+      return res.status(400).json({ message: 'Nội dung câu hỏi là bắt buộc.' });
+    }
+
+    if (!optionA || !optionB || !optionC || !optionD) {
+      return res.status(400).json({ message: 'Vui lòng nhập đủ 4 đáp án.' });
+    }
+
+    if (!['A', 'B', 'C', 'D'].includes(correctOption)) {
+      return res.status(400).json({ message: 'Đáp án đúng không hợp lệ.' });
+    }
+
+    const pool = await getPool();
+
+    const examCheck = await pool
+      .request()
+      .input('teacherId', sql.Int, userId)
+      .input('examId', sql.Int, examId)
+      .query(`
+        SELECT TOP 1 Id
+        FROM ExamPapers
+        WHERE Id = @examId AND TeacherId = @teacherId AND IsDeleted = 0
+      `);
+
+    if (examCheck.recordset.length === 0) {
+      return res.status(404).json({ message: 'Exam paper not found or not owned by teacher.' });
+    }
+
+    const updateResult = await pool
+      .request()
+      .input('questionId', sql.Int, questionId)
+      .input('examId', sql.Int, examId)
+      .input('content', sql.NVarChar(sql.MAX), content)
+      .input('optionA', sql.NVarChar(sql.MAX), optionA)
+      .input('optionB', sql.NVarChar(sql.MAX), optionB)
+      .input('optionC', sql.NVarChar(sql.MAX), optionC)
+      .input('optionD', sql.NVarChar(sql.MAX), optionD)
+      .input('correctOption', sql.Char(1), correctOption)
+      .query(`
+        UPDATE Questions
+        SET Content = @content,
+            OptionA = @optionA,
+            OptionB = @optionB,
+            OptionC = @optionC,
+            OptionD = @optionD,
+            CorrectOption = @correctOption
+        WHERE Id = @questionId AND ExamPaperId = @examId
+      `);
+
+    if (updateResult.rowsAffected[0] === 0) {
+      return res.status(404).json({ message: 'Question not found.' });
+    }
+
+    const questionResult = await pool
+      .request()
+      .input('questionId', sql.Int, questionId)
+      .query(`
+        SELECT TOP 1
+          q.Id,
+          q.Content,
+          q.OptionA,
+          q.OptionB,
+          q.OptionC,
+          q.OptionD,
+          q.CorrectOption
+        FROM Questions q
+        WHERE q.Id = @questionId
+      `);
+
+    return res.json({ question: questionResult.recordset[0] });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+app.delete('/api/dashboard/teacher/:userId/exams/:examId', async (req, res) => {
+  try {
+    const userId = Number(req.params.userId);
+    const examId = Number(req.params.examId);
+
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({ message: 'Invalid userId.' });
+    }
+
+    if (!Number.isInteger(examId) || examId <= 0) {
+      return res.status(400).json({ message: 'Invalid examId.' });
+    }
+
+    const pool = await getPool();
+
+    const examCheck = await pool
+      .request()
+      .input('teacherId', sql.Int, userId)
+      .input('examId', sql.Int, examId)
+      .query(`
+        SELECT TOP 1 Id
+        FROM ExamPapers
+        WHERE Id = @examId AND TeacherId = @teacherId AND IsDeleted = 0
+      `);
+
+    if (examCheck.recordset.length === 0) {
+      return res.status(404).json({ message: 'Exam paper not found or not owned by teacher.' });
+    }
+
+    await pool
+      .request()
+      .input('examId', sql.Int, examId)
+      .query(`
+        UPDATE ExamPapers
+        SET IsDeleted = 1
+        WHERE Id = @examId
+      `);
+
+    return res.json({ ok: true });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+app.post('/api/dashboard/teacher/:userId/exams/:examId/copy', async (req, res) => {
+  const userId = Number(req.params.userId);
+  const examId = Number(req.params.examId);
+
+  if (!Number.isInteger(userId) || userId <= 0) {
+    return res.status(400).json({ message: 'Invalid userId.' });
+  }
+
+  if (!Number.isInteger(examId) || examId <= 0) {
+    return res.status(400).json({ message: 'Invalid examId.' });
+  }
+
+  const pool = await getPool();
+  const transaction = new sql.Transaction(pool);
+
+  try {
+    await transaction.begin();
+
+    const examResult = await new sql.Request(transaction)
+      .input('teacherId', sql.Int, userId)
+      .input('examId', sql.Int, examId)
+      .query(`
+        SELECT TOP 1
+          Id,
+          Title,
+          Subject,
+          DurationInMinutes,
+          IsDraft
+        FROM ExamPapers
+        WHERE Id = @examId AND TeacherId = @teacherId AND IsDeleted = 0
+      `);
+
+    if (examResult.recordset.length === 0) {
+      await transaction.rollback();
+      return res.status(404).json({ message: 'Exam paper not found or not owned by teacher.' });
+    }
+
+    const sourceExam = examResult.recordset[0];
+    const newTitle = `${sourceExam.Title} (Sao chép)`;
+
+    const insertExamResult = await new sql.Request(transaction)
+      .input('title', sql.NVarChar(255), newTitle)
+      .input('subject', sql.NVarChar(255), sourceExam.Subject)
+      .input('duration', sql.Int, sourceExam.DurationInMinutes)
+      .input('teacherId', sql.Int, userId)
+      .input('isDraft', sql.Bit, sourceExam.IsDraft)
+      .query(`
+        INSERT INTO ExamPapers (Title, Subject, DurationInMinutes, TeacherId, IsDraft, IsDeleted)
+        OUTPUT INSERTED.Id, INSERTED.Title, INSERTED.Subject, INSERTED.DurationInMinutes, INSERTED.CreatedAt, INSERTED.IsDraft
+        VALUES (@title, @subject, @duration, @teacherId, @isDraft, 0)
+      `);
+
+    const newExam = insertExamResult.recordset[0];
+
+    await new sql.Request(transaction)
+      .input('newExamId', sql.Int, newExam.Id)
+      .input('examId', sql.Int, examId)
+      .query(`
+        INSERT INTO Questions (ExamPaperId, Content, OptionA, OptionB, OptionC, OptionD, CorrectOption)
+        SELECT @newExamId, Content, OptionA, OptionB, OptionC, OptionD, CorrectOption
+        FROM Questions
+        WHERE ExamPaperId = @examId
+      `);
+
+    await transaction.commit();
+
+    const examWithCount = await pool
+      .request()
+      .input('examId', sql.Int, newExam.Id)
+      .query(`
+        SELECT TOP 1
+          ep.Id,
+          ep.Title,
+          ep.Subject,
+          ep.DurationInMinutes,
+          ep.CreatedAt,
+          ep.IsDraft,
+          (SELECT COUNT(*) FROM Questions q WHERE q.ExamPaperId = ep.Id) AS QuestionCount
+        FROM ExamPapers ep
+        WHERE ep.Id = @examId
+      `);
+
+    return res.status(201).json({ examPaper: examWithCount.recordset[0] });
+  } catch (error) {
+    await transaction.rollback();
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+app.get('/api/dashboard/teacher/:userId/exams/:examId/export', async (req, res) => {
+  try {
+    const userId = Number(req.params.userId);
+    const examId = Number(req.params.examId);
+
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({ message: 'Invalid userId.' });
+    }
+
+    if (!Number.isInteger(examId) || examId <= 0) {
+      return res.status(400).json({ message: 'Invalid examId.' });
+    }
+
+    const pool = await getPool();
+
+    const examResult = await pool
+      .request()
+      .input('teacherId', sql.Int, userId)
+      .input('examId', sql.Int, examId)
+      .query(`
+        SELECT TOP 1
+          ep.Id,
+          ep.Title,
+          ep.Subject,
+          ep.DurationInMinutes,
+          ep.CreatedAt,
+          ep.IsDraft
+        FROM ExamPapers ep
+        WHERE ep.Id = @examId AND ep.TeacherId = @teacherId AND ep.IsDeleted = 0
+      `);
+
+    if (examResult.recordset.length === 0) {
+      return res.status(404).json({ message: 'Exam paper not found or not owned by teacher.' });
+    }
+
+    const questionsResult = await pool
+      .request()
+      .input('examId', sql.Int, examId)
+      .query(`
+        SELECT
+          q.Id,
+          q.Content,
+          q.OptionA,
+          q.OptionB,
+          q.OptionC,
+          q.OptionD,
+          q.CorrectOption
+        FROM Questions q
+        WHERE q.ExamPaperId = @examId
+        ORDER BY q.Id ASC
+      `);
+
+    const exam = examResult.recordset[0];
+    const questions = questionsResult.recordset;
+    const filename = `exam-${exam.Id}.pdf`;
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+    const doc = new PDFDocument({ margin: 50 });
+    doc.pipe(res);
+
+    doc.fontSize(20).text(exam.Title || 'Exam Paper', { align: 'center' });
+    doc.moveDown(0.5);
+    doc.fontSize(12).text(`Subject: ${exam.Subject || '--'}`);
+    doc.text(`Duration: ${exam.DurationInMinutes || 0} minutes`);
+    doc.text(`Status: ${exam.IsDraft ? 'Draft' : 'Published'}`);
+    doc.moveDown(1);
+
+    questions.forEach((q, index) => {
+      doc.fontSize(12).text(`${index + 1}. ${q.Content || ''}`);
+      doc.moveDown(0.25);
+      doc.fontSize(11).text(`A. ${q.OptionA || ''}`);
+      doc.fontSize(11).text(`B. ${q.OptionB || ''}`);
+      doc.fontSize(11).text(`C. ${q.OptionC || ''}`);
+      doc.fontSize(11).text(`D. ${q.OptionD || ''}`);
+      doc.fontSize(10).fillColor('#666666').text(`Correct: ${q.CorrectOption || '--'}`);
+      doc.fillColor('#000000');
+      doc.moveDown(0.75);
+    });
+
+    doc.end();
+  } catch (error) {
     return res.status(500).json({ message: error.message });
   }
 });

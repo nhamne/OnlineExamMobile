@@ -37,7 +37,6 @@ const ForgotPasswordScreen = ({ navigation }) => {
       showToast(res.message || 'Đã gửi mã OTP.', 'success');
       setOtpSent(true);
     } catch (error) {
-      console.error('Send OTP error:', error);
       showToast(error?.response?.data?.message || 'Không thể kết nối đến máy chủ.', 'error');
     } finally {
       setLoading(false);
@@ -66,7 +65,6 @@ const ForgotPasswordScreen = ({ navigation }) => {
       showToast('Đổi mật khẩu thành công. Vui lòng đăng nhập lại.', 'success');
       navigation.replace('Login');
     } catch (error) {
-      console.error('Reset password error:', error);
       showToast(error?.response?.data?.message || 'Không thể kết nối đến máy chủ.', 'error');
     } finally {
       setLoading(false);
