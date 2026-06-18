@@ -141,6 +141,16 @@ const StatCard = ({ icon, label, value, tone = 'default', onPress }) => {
   );
 };
 
+const SimpleSessionCard = ({ item }) => (
+  <View className="bg-white p-4 rounded-2xl mb-3 border border-slate-100" style={{ ...ambientShadow }}>
+    <Text className="text-base font-bold text-on-surface" numberOfLines={2}>{item.SessionName || '--'}</Text>
+    <Text className="text-sm text-on-surface-variant mt-1" numberOfLines={1}>{item.ExamTitle || '--'} • {item.ClassName || '--'}</Text>
+    <Text className="text-xs text-primary font-semibold mt-2" numberOfLines={1}>
+      {item.StartTime ? `Hạn: ${new Date(item.StartTime).toLocaleDateString('vi-VN')} ${new Date(item.StartTime).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', hour12: false })}` : 'Hạn: --'}
+    </Text>
+  </View>
+);
+
 const SessionCard = ({ item, onPress }) => {
   const state = getSessionState(item);
   const canPress = state.action !== 'none';
@@ -222,6 +232,7 @@ const StudentDashboardScreen = ({ route, navigation }) => {
   const [sessions, setSessions] = useState([]);
   const [classrooms, setClassrooms] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [isSearching, setIsSearching] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [activeMenu, setActiveMenu] = useState(route?.params?.activeMenu || 'home');
@@ -249,10 +260,28 @@ const StudentDashboardScreen = ({ route, navigation }) => {
   const [currentPwd, setCurrentPwd] = useState('');
   const [newPwd, setNewPwd] = useState('');
   const [confirmPwd, setConfirmPwd] = useState('');
+  const [showCurrentPwd, setShowCurrentPwd] = useState(false);
+  const [showNewPwd, setShowNewPwd] = useState(false);
+  const [showConfirmPwd, setShowConfirmPwd] = useState(false);
   const [changingPwd, setChangingPwd] = useState(false);
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   const [biometricEnabled, setBiometricEnabled] = useState(false);
   const [biometricSaving, setBiometricSaving] = useState(false);
+
+  const closeEditProfileModal = () => {
+    setEditProfileVisible(false);
+    setEditName(user?.fullName || '');
+  };
+
+  const closeChangePwdModal = () => {
+    setChangePwdVisible(false);
+    setCurrentPwd('');
+    setNewPwd('');
+    setConfirmPwd('');
+    setShowCurrentPwd(false);
+    setShowNewPwd(false);
+    setShowConfirmPwd(false);
+  };
 
   const initials = useMemo(() => {
     const fullName = user?.fullName || '';
@@ -441,7 +470,7 @@ const StudentDashboardScreen = ({ route, navigation }) => {
         }
       } else {
         try {
-          setLoading(true);
+          setIsSearching(true);
           const [resC, resS] = await Promise.all([
             globalSearch('classrooms', searchText.trim(), null, user?.id),
             globalSearch('examsessions', searchText.trim(), null, user?.id),
@@ -450,12 +479,12 @@ const StudentDashboardScreen = ({ route, navigation }) => {
           setSessions(resS.results || []);
 
           if (resC.fallback || resS.fallback) {
-            showToast('Meilisearch không hoạt động. Đang dùng tìm kiếm thường.', 'warning');
+            
           }
         } catch (err) {
           console.error('Search error:', err);
         } finally {
-          setLoading(false);
+          setIsSearching(false);
         }
       }
     }, 500);
@@ -499,7 +528,7 @@ const StudentDashboardScreen = ({ route, navigation }) => {
       </View>
 
             {filteredSessions.slice(0, 4).map((item) => (
-        <SessionCard key={String(item.Id)} item={item} onPress={handleEnterSession} />
+        <SimpleSessionCard key={String(item.Id)} item={item} />
             ))}
 
       {filteredSessions.length === 0 ? (
@@ -764,7 +793,10 @@ const StudentDashboardScreen = ({ route, navigation }) => {
         <View className="mt-5 flex-row gap-3">
           <TouchableOpacity
             className="flex-1 bg-primary rounded-xl h-11 items-center justify-center flex-row"
-            onPress={() => setEditProfileVisible(true)}
+            onPress={() => {
+              setEditName(user?.fullName || '');
+              setEditProfileVisible(true);
+            }}
           >
             <MaterialIcons name="edit" size={18} color="#FFFFFF" />
             <Text className="text-white font-bold ml-2">Chỉnh sửa</Text>
@@ -772,7 +804,15 @@ const StudentDashboardScreen = ({ route, navigation }) => {
 
           <TouchableOpacity
             className="flex-1 bg-surface-container-high rounded-xl h-11 items-center justify-center flex-row border"
-            onPress={() => setChangePwdVisible(true)}
+            onPress={() => {
+              setCurrentPwd('');
+              setNewPwd('');
+              setConfirmPwd('');
+              setShowCurrentPwd(false);
+              setShowNewPwd(false);
+              setShowConfirmPwd(false);
+              setChangePwdVisible(true);
+            }}
           >
             <MaterialIcons name="vpn-key" size={16} color="#1F2937" />
             <Text className="text-on-surface font-bold ml-2">Đổi mật khẩu</Text>
@@ -791,25 +831,24 @@ const StudentDashboardScreen = ({ route, navigation }) => {
         </TouchableOpacity>
 
         {/* Edit profile modal */}
-        <Modal visible={editProfileVisible} transparent animationType="fade" onRequestClose={() => setEditProfileVisible(false)}>
+        <Modal visible={editProfileVisible} transparent animationType="fade" onRequestClose={closeEditProfileModal}>
           <View className="flex-1 bg-black/40 items-center justify-center px-4">
             <View className="w-full max-w-[420px] bg-white rounded-3xl p-5 border border-slate-100">
               <Text className="text-xl font-black text-on-surface mb-2">Chỉnh sửa thông tin</Text>
-              <TextInput className="bg-slate-50 border border-slate-200 rounded-xl px-4 h-12 text-on-surface font-medium mb-3" value={editName} onChangeText={setEditName} placeholder="Họ và tên" />
-              <TextInput className="bg-slate-50 border border-slate-200 rounded-xl px-4 h-12 text-on-surface font-medium mb-4" value={editEmail} onChangeText={setEditEmail} placeholder="Email" keyboardType="email-address" autoCapitalize="none" />
+              <TextInput className="bg-slate-50 border border-slate-200 rounded-xl px-4 h-12 text-on-surface font-medium mb-4" value={editName} onChangeText={setEditName} placeholder="Họ và tên" />
               <View className="flex-row gap-3">
-                <TouchableOpacity className="flex-1 h-12 rounded-xl items-center justify-center bg-slate-100" onPress={() => setEditProfileVisible(false)} disabled={savingProfile}>
+                <TouchableOpacity className="flex-1 h-12 rounded-xl items-center justify-center bg-slate-100" onPress={closeEditProfileModal} disabled={savingProfile}>
                   <Text className="text-on-surface font-bold">Hủy</Text>
                 </TouchableOpacity>
                 <TouchableOpacity className={`flex-1 h-12 rounded-xl items-center justify-center bg-primary ${savingProfile ? 'opacity-70' : ''}`} onPress={async () => {
-                  if (!editName.trim() || !editEmail.trim()) { showToast('Vui lòng điền tên và email.', 'warning'); return; }
+                  if (!editName.trim()) { showToast('Vui lòng điền tên hiển thị.', 'warning'); return; }
                   setSavingProfile(true);
                   try {
-                    const res = await updateUserProfile(user?.id, { fullName: editName.trim(), email: editEmail.trim() });
+                    const res = await updateUserProfile(user?.id, { fullName: editName.trim() });
                     showToast(res?.message || 'Cập nhật thành công', 'success');
                     // update navigation params so parent screens see updated user
                     navigation.setParams({ user: res?.user });
-                    setEditProfileVisible(false);
+                    closeEditProfileModal();
                   } catch (err) {
                     showToast(err?.response?.data?.message || err.message || 'Lỗi khi cập nhật.', 'error');
                   } finally { setSavingProfile(false); }
@@ -822,15 +861,34 @@ const StudentDashboardScreen = ({ route, navigation }) => {
         </Modal>
 
         {/* Change password modal */}
-        <Modal visible={changePwdVisible} transparent animationType="fade" onRequestClose={() => setChangePwdVisible(false)}>
+        <Modal visible={changePwdVisible} transparent animationType="fade" onRequestClose={closeChangePwdModal}>
           <View className="flex-1 bg-black/40 items-center justify-center px-4">
             <View className="w-full max-w-[420px] bg-white rounded-3xl p-5 border border-slate-100">
               <Text className="text-xl font-black text-on-surface mb-2">Đổi mật khẩu</Text>
-              <TextInput className="bg-slate-50 border border-slate-200 rounded-xl px-4 h-12 text-on-surface font-medium mb-3" value={currentPwd} onChangeText={setCurrentPwd} placeholder="Mật khẩu hiện tại" secureTextEntry />
-              <TextInput className="bg-slate-50 border border-slate-200 rounded-xl px-4 h-12 text-on-surface font-medium mb-3" value={newPwd} onChangeText={setNewPwd} placeholder="Mật khẩu mới" secureTextEntry />
-              <TextInput className="bg-slate-50 border border-slate-200 rounded-xl px-4 h-12 text-on-surface font-medium mb-4" value={confirmPwd} onChangeText={setConfirmPwd} placeholder="Xác nhận mật khẩu mới" secureTextEntry />
+              
+              <View className="relative mb-3">
+                <TextInput className="bg-slate-50 border border-slate-200 rounded-xl px-4 pr-12 h-12 text-on-surface font-medium" value={currentPwd} onChangeText={setCurrentPwd} placeholder="Mật khẩu hiện tại" secureTextEntry={!showCurrentPwd} />
+                <TouchableOpacity className="absolute right-0 top-0 bottom-0 px-4 justify-center" onPress={() => setShowCurrentPwd(!showCurrentPwd)}>
+                  <MaterialIcons name={showCurrentPwd ? "visibility" : "visibility-off"} size={20} color="#64748B" />
+                </TouchableOpacity>
+              </View>
+
+              <View className="relative mb-3">
+                <TextInput className="bg-slate-50 border border-slate-200 rounded-xl px-4 pr-12 h-12 text-on-surface font-medium" value={newPwd} onChangeText={setNewPwd} placeholder="Mật khẩu mới" secureTextEntry={!showNewPwd} />
+                <TouchableOpacity className="absolute right-0 top-0 bottom-0 px-4 justify-center" onPress={() => setShowNewPwd(!showNewPwd)}>
+                  <MaterialIcons name={showNewPwd ? "visibility" : "visibility-off"} size={20} color="#64748B" />
+                </TouchableOpacity>
+              </View>
+
+              <View className="relative mb-4">
+                <TextInput className="bg-slate-50 border border-slate-200 rounded-xl px-4 pr-12 h-12 text-on-surface font-medium" value={confirmPwd} onChangeText={setConfirmPwd} placeholder="Xác nhận mật khẩu mới" secureTextEntry={!showConfirmPwd} />
+                <TouchableOpacity className="absolute right-0 top-0 bottom-0 px-4 justify-center" onPress={() => setShowConfirmPwd(!showConfirmPwd)}>
+                  <MaterialIcons name={showConfirmPwd ? "visibility" : "visibility-off"} size={20} color="#64748B" />
+                </TouchableOpacity>
+              </View>
+
               <View className="flex-row gap-3">
-                <TouchableOpacity className="flex-1 h-12 rounded-xl items-center justify-center bg-slate-100" onPress={() => setChangePwdVisible(false)} disabled={changingPwd}>
+                <TouchableOpacity className="flex-1 h-12 rounded-xl items-center justify-center bg-slate-100" onPress={closeChangePwdModal} disabled={changingPwd}>
                   <Text className="text-on-surface font-bold">Hủy</Text>
                 </TouchableOpacity>
                 <TouchableOpacity className={`flex-1 h-12 rounded-xl items-center justify-center bg-primary ${changingPwd ? 'opacity-70' : ''}`} onPress={async () => {
@@ -840,8 +898,7 @@ const StudentDashboardScreen = ({ route, navigation }) => {
                   try {
                     await changeUserPassword(user?.id, currentPwd, newPwd);
                     showToast('Đổi mật khẩu thành công.', 'success');
-                    setChangePwdVisible(false);
-                    setCurrentPwd(''); setNewPwd(''); setConfirmPwd('');
+                    closeChangePwdModal();
                   } catch (err) {
                     showToast(err?.response?.data?.message || err.message || 'Lỗi khi đổi mật khẩu.', 'error');
                   } finally { setChangingPwd(false); }
@@ -1010,3 +1067,4 @@ const StudentDashboardScreen = ({ route, navigation }) => {
 };
 
 export default StudentDashboardScreen;
+

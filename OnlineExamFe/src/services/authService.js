@@ -236,9 +236,10 @@ export async function changeUserPassword(userId, currentPassword, newPassword) {
   return response.data;
 }
 
-export async function globalSearch(index, query, teacherId = null) {
+export async function globalSearch(index, query, teacherId = null, studentId = null) {
   let url = `/api/search?index=${index}&q=${encodeURIComponent(query)}`;
   if (teacherId) url += `&teacherId=${teacherId}`;
+  if (studentId) url += `&studentId=${studentId}`;
   const response = await api.get(url);
   return response.data;
 }

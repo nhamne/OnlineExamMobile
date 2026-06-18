@@ -298,6 +298,7 @@ export default function AIOCRScreen({ navigation, route }) {
     navigation.navigate('TeacherManualExamForm', {
       user,
       questions: formattedQuestions,
+      isAI: true,
     });
   };
 

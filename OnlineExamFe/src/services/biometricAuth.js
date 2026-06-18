@@ -19,17 +19,17 @@ function getBiometricUserKey(role) {
 
 function getBiometricLabel(types = []) {
   if (types.includes(LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION)) {
-    return 'khuon mat';
+    return 'vân tay';
   }
 
   if (
     types.includes(LocalAuthentication.AuthenticationType.FINGERPRINT) ||
     types.includes(LocalAuthentication.AuthenticationType.IRIS)
   ) {
-    return 'van tay';
+    return 'vân tay';
   }
 
-  return 'sinh trac hoc';
+  return 'sinh trắc học';
 }
 
 export async function getBiometricInfo(role) {
@@ -90,7 +90,7 @@ export async function authenticateBiometricLogin(role) {
   }
 
   const authResult = await LocalAuthentication.authenticateAsync({
-    promptMessage: `Dang nhap bang ${info.label}`,
+    promptMessage: `Đăng nhập bằng ${info.label}`,
     cancelLabel: 'Huy',
     disableDeviceFallback: false,
   });

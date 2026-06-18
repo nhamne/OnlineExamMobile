@@ -508,7 +508,7 @@ const SessionScreen = ({ route, navigation }) => {
           const res = await globalSearch('examsessions', searchText.trim(), user?.id);
           setSessions(res.results || []);
           if (res.fallback) {
-            showToast('Meilisearch không hoạt động. Đang dùng tìm kiếm thường.', 'warning');
+            
           }
         } catch (err) {
           console.error('Search error:', err);
@@ -579,6 +579,7 @@ const SessionScreen = ({ route, navigation }) => {
       if (startDate && endDate && Number.isInteger(state.classroomId)) {
         const overlappedSession = sessions.find((session) => {
           if (Number(session?.ClassroomId) !== Number(state.classroomId)) return false;
+          if (formMode === 'edit' && editingSession?.Id && Number(session.Id) === Number(editingSession.Id)) return false;
           const sessionStart = new Date(session?.StartTime);
           const sessionEnd = new Date(session?.EndTime);
           if (Number.isNaN(sessionStart.getTime()) || Number.isNaN(sessionEnd.getTime())) return false;
@@ -592,7 +593,7 @@ const SessionScreen = ({ route, navigation }) => {
 
       return errors;
     },
-    [formOptions.examPapers, sessions]
+    [formOptions.examPapers, sessions, formMode, editingSession]
   );
 
   useEffect(() => {
@@ -1071,7 +1072,7 @@ const SessionScreen = ({ route, navigation }) => {
                   <View className="w-10 h-10 rounded-2xl bg-blue-100 items-center justify-center mr-3">
                     <MaterialIcons name="event" size={20} color="#0B63C8" />
                   </View>
-                  <Text className="text-on-surface text-2xl font-bold">Tạo ca thi mới</Text>
+                  <Text className="text-on-surface text-2xl font-bold">{formMode === 'edit' ? 'Chỉnh sửa ca thi' : 'Tạo ca thi mới'}</Text>
                 </View>
                 <TouchableOpacity onPress={onCloseCreateModal} disabled={formSubmitting || previewSubmitting}>
                   <MaterialIcons name="close" size={24} color="#727785" />
@@ -1670,3 +1671,4 @@ const SessionScreen = ({ route, navigation }) => {
 };
 
 export default SessionScreen;
+

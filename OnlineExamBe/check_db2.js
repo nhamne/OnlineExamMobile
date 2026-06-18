@@ -10,7 +10,7 @@ async function check() {
     options: { encrypt: false, trustServerCertificate: true }
   });
 
-  const r = await pool.request().query("SELECT Id, SessionName, StartTime, EndTime, GETDATE() as DBTime FROM ExamSessions WHERE SessionName LIKE '%4444%'");
+  const r = await pool.request().query("SELECT GETDATE() as LocalTime, GETUTCDATE() as UTCTime");
   console.log(r.recordset);
   process.exit(0);
 }

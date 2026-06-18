@@ -80,7 +80,7 @@ const StudentResultsContent = ({ userId, onSelectAttempt }) => {
         const sessionIds = (searchRes.results || []).map((s) => s.Id);
         setFilteredResults(results.filter(r => sessionIds.includes(r.ExamSessionId)));
         if (searchRes.fallback) {
-          showToast('Meilisearch không hoạt động. Đang dùng tìm kiếm thường.', 'warning');
+          
         }
       } catch (err) {
         console.error('Search results error:', err);
@@ -201,3 +201,4 @@ const StudentResultsContent = ({ userId, onSelectAttempt }) => {
 };
 
 export default StudentResultsContent;
+

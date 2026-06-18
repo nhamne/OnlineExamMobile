@@ -43,7 +43,25 @@ const TeacherProfileScreen = ({ route, navigation }) => {
   const [currentPwd, setCurrentPwd] = useState('');
   const [newPwd, setNewPwd] = useState('');
   const [confirmPwd, setConfirmPwd] = useState('');
+  const [showCurrentPwd, setShowCurrentPwd] = useState(false);
+  const [showNewPwd, setShowNewPwd] = useState(false);
+  const [showConfirmPwd, setShowConfirmPwd] = useState(false);
   const [changing, setChanging] = useState(false);
+
+  const closeEditModal = () => {
+    setEditVisible(false);
+    setEditName(user?.fullName || '');
+  };
+
+  const closeChangeModal = () => {
+    setChangeVisible(false);
+    setCurrentPwd('');
+    setNewPwd('');
+    setConfirmPwd('');
+    setShowCurrentPwd(false);
+    setShowNewPwd(false);
+    setShowConfirmPwd(false);
+  };
 
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   const [biometricEnabled, setBiometricEnabled] = useState(false);
@@ -215,14 +233,25 @@ const TeacherProfileScreen = ({ route, navigation }) => {
             <View className="mt-4 flex-row gap-3">
               <TouchableOpacity
                 className="flex-1 bg-primary rounded-xl h-11 items-center justify-center flex-row"
-                onPress={() => setEditVisible(true)}
+                onPress={() => {
+                  setEditName(user?.fullName || '');
+                  setEditVisible(true);
+                }}
               >
                 <MaterialIcons name="edit" size={18} color="#FFFFFF" />
                 <Text className="text-white font-bold ml-2">Chỉnh sửa</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 className="flex-1 bg-surface-container-high rounded-xl h-11 items-center justify-center flex-row border"
-                onPress={() => setChangeVisible(true)}
+                onPress={() => {
+                  setCurrentPwd('');
+                  setNewPwd('');
+                  setConfirmPwd('');
+                  setShowCurrentPwd(false);
+                  setShowNewPwd(false);
+                  setShowConfirmPwd(false);
+                  setChangeVisible(true);
+                }}
               >
                 <MaterialIcons name="vpn-key" size={16} color="#1F2937" />
                 <Text className="text-on-surface font-bold ml-2">Đổi mật khẩu</Text>
@@ -236,28 +265,20 @@ const TeacherProfileScreen = ({ route, navigation }) => {
               <Text className="text-red-600 font-black text-base">Đăng xuất</Text>
             </TouchableOpacity>
 
-            <Modal visible={editVisible} transparent animationType="fade" onRequestClose={() => setEditVisible(false)}>
+            <Modal visible={editVisible} transparent animationType="fade" onRequestClose={closeEditModal}>
               <View className="flex-1 bg-black/40 items-center justify-center px-4">
                 <View className="w-full max-w-[420px] bg-white rounded-3xl p-5 border border-slate-100">
                   <Text className="text-xl font-black text-on-surface mb-2">Chỉnh sửa thông tin</Text>
                   <TextInput
-                    className="bg-slate-50 border border-slate-200 rounded-xl px-4 h-12 text-on-surface font-medium mb-3"
+                    className="bg-slate-50 border border-slate-200 rounded-xl px-4 h-12 text-on-surface font-medium mb-4"
                     value={editName}
                     onChangeText={setEditName}
                     placeholder="Họ và tên"
                   />
-                  <TextInput
-                    className="bg-slate-50 border border-slate-200 rounded-xl px-4 h-12 text-on-surface font-medium mb-4"
-                    value={editEmail}
-                    onChangeText={setEditEmail}
-                    placeholder="Email"
-                    keyboardType="email-address"
-                    autoCapitalize="none"
-                  />
                   <View className="flex-row gap-3">
                     <TouchableOpacity
                       className="flex-1 h-12 rounded-xl items-center justify-center bg-slate-100"
-                      onPress={() => setEditVisible(false)}
+                      onPress={closeEditModal}
                       disabled={saving}
                     >
                       <Text className="text-on-surface font-bold">Hủy</Text>
@@ -265,19 +286,18 @@ const TeacherProfileScreen = ({ route, navigation }) => {
                     <TouchableOpacity
                       className={`flex-1 h-12 rounded-xl items-center justify-center bg-primary ${saving ? 'opacity-70' : ''}`}
                       onPress={async () => {
-                        if (!editName.trim() || !editEmail.trim()) {
-                          showToast('Vui lòng điền tên và email.', 'warning');
+                        if (!editName.trim()) {
+                          showToast('Vui lòng điền tên hiển thị.', 'warning');
                           return;
                         }
                         setSaving(true);
                         try {
                           const res = await updateUserProfile(user?.id, {
                             fullName: editName.trim(),
-                            email: editEmail.trim(),
                           });
                           showToast(res?.message || 'Cập nhật thành công', 'success');
                           navigation.setParams({ user: res?.user });
-                          setEditVisible(false);
+                          closeEditModal();
                         } catch (err) {
                           showToast(err?.response?.data?.message || err.message || 'Lỗi khi cập nhật.', 'error');
                         } finally {
@@ -293,35 +313,63 @@ const TeacherProfileScreen = ({ route, navigation }) => {
               </View>
             </Modal>
 
-            <Modal visible={changeVisible} transparent animationType="fade" onRequestClose={() => setChangeVisible(false)}>
+            <Modal visible={changeVisible} transparent animationType="fade" onRequestClose={closeChangeModal}>
               <View className="flex-1 bg-black/40 items-center justify-center px-4">
                 <View className="w-full max-w-[420px] bg-white rounded-3xl p-5 border border-slate-100">
                   <Text className="text-xl font-black text-on-surface mb-2">Đổi mật khẩu</Text>
-                  <TextInput
-                    className="bg-slate-50 border border-slate-200 rounded-xl px-4 h-12 text-on-surface font-medium mb-3"
-                    value={currentPwd}
-                    onChangeText={setCurrentPwd}
-                    placeholder="Mật khẩu hiện tại"
-                    secureTextEntry
-                  />
-                  <TextInput
-                    className="bg-slate-50 border border-slate-200 rounded-xl px-4 h-12 text-on-surface font-medium mb-3"
-                    value={newPwd}
-                    onChangeText={setNewPwd}
-                    placeholder="Mật khẩu mới"
-                    secureTextEntry
-                  />
-                  <TextInput
-                    className="bg-slate-50 border border-slate-200 rounded-xl px-4 h-12 text-on-surface font-medium mb-4"
-                    value={confirmPwd}
-                    onChangeText={setConfirmPwd}
-                    placeholder="Xác nhận mật khẩu mới"
-                    secureTextEntry
-                  />
+                  
+                  <View className="relative mb-3">
+                    <TextInput
+                      className="bg-slate-50 border border-slate-200 rounded-xl px-4 pr-12 h-12 text-on-surface font-medium"
+                      value={currentPwd}
+                      onChangeText={setCurrentPwd}
+                      placeholder="Mật khẩu hiện tại"
+                      secureTextEntry={!showCurrentPwd}
+                    />
+                    <TouchableOpacity
+                      className="absolute right-0 top-0 bottom-0 px-4 justify-center"
+                      onPress={() => setShowCurrentPwd(!showCurrentPwd)}
+                    >
+                      <MaterialIcons name={showCurrentPwd ? "visibility" : "visibility-off"} size={20} color="#64748B" />
+                    </TouchableOpacity>
+                  </View>
+
+                  <View className="relative mb-3">
+                    <TextInput
+                      className="bg-slate-50 border border-slate-200 rounded-xl px-4 pr-12 h-12 text-on-surface font-medium"
+                      value={newPwd}
+                      onChangeText={setNewPwd}
+                      placeholder="Mật khẩu mới"
+                      secureTextEntry={!showNewPwd}
+                    />
+                    <TouchableOpacity
+                      className="absolute right-0 top-0 bottom-0 px-4 justify-center"
+                      onPress={() => setShowNewPwd(!showNewPwd)}
+                    >
+                      <MaterialIcons name={showNewPwd ? "visibility" : "visibility-off"} size={20} color="#64748B" />
+                    </TouchableOpacity>
+                  </View>
+
+                  <View className="relative mb-4">
+                    <TextInput
+                      className="bg-slate-50 border border-slate-200 rounded-xl px-4 pr-12 h-12 text-on-surface font-medium"
+                      value={confirmPwd}
+                      onChangeText={setConfirmPwd}
+                      placeholder="Xác nhận mật khẩu mới"
+                      secureTextEntry={!showConfirmPwd}
+                    />
+                    <TouchableOpacity
+                      className="absolute right-0 top-0 bottom-0 px-4 justify-center"
+                      onPress={() => setShowConfirmPwd(!showConfirmPwd)}
+                    >
+                      <MaterialIcons name={showConfirmPwd ? "visibility" : "visibility-off"} size={20} color="#64748B" />
+                    </TouchableOpacity>
+                  </View>
+
                   <View className="flex-row gap-3">
                     <TouchableOpacity
                       className="flex-1 h-12 rounded-xl items-center justify-center bg-slate-100"
-                      onPress={() => setChangeVisible(false)}
+                      onPress={closeChangeModal}
                       disabled={changing}
                     >
                       <Text className="text-on-surface font-bold">Hủy</Text>
@@ -341,10 +389,7 @@ const TeacherProfileScreen = ({ route, navigation }) => {
                         try {
                           await changeUserPassword(user?.id, currentPwd, newPwd);
                           showToast('Đổi mật khẩu thành công.', 'success');
-                          setChangeVisible(false);
-                          setCurrentPwd('');
-                          setNewPwd('');
-                          setConfirmPwd('');
+                          closeChangeModal();
                         } catch (err) {
                           showToast(err?.response?.data?.message || err.message || 'Lỗi khi đổi mật khẩu.', 'error');
                         } finally {

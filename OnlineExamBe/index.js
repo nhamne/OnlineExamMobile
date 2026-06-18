@@ -7,6 +7,9 @@ const sql = require('mssql');
 const { syncDocument, deleteDocument, searchIndex } = require('./services/meilisearchService');
 require('dotenv').config({ override: true });
 const multer = require('multer');
+const { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } = require('@google/generative-ai');
+const PDFDocument = require('pdfkit');
+const { Document, Packer, Paragraph, TextRun, HeadingLevel } = require('docx');
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
@@ -581,7 +584,9 @@ app.post('/api/auth/forgot-password/send-otp', async (req, res) => {
       from: process.env.EMAIL_USER,
       to: email,
       subject: 'Mã xác nhận quên mật khẩu',
-      text: `Mã xác nhận (OTP) của bạn là: ${otp}\n\nMã này sẽ hết hạn trong 5 phút.`,
+      text: `Mã xác nhận (OTP) của bạn là: ${otp}
+
+Mã này sẽ hết hạn trong 5 phút.`,
     };
 
     await transporter.sendMail(mailOptions);
@@ -1149,7 +1154,7 @@ app.get('/api/dashboard/teacher/:userId', async (req, res) => {
              FROM ExamSessions es
              INNER JOIN Classrooms c ON c.Id = es.ClassroomId
              INNER JOIN ExamPapers ep ON ep.Id = es.ExamPaperId
-            WHERE c.TeacherId = @teacherId AND c.IsDeleted = 0 AND es.IsDeleted = 0 AND ep.IsDeleted = 0 AND es.EndTime >= GETDATE()
+            WHERE c.TeacherId = @teacherId AND c.IsDeleted = 0 AND es.IsDeleted = 0 AND ep.IsDeleted = 0 AND es.EndTime >= GETUTCDATE()
           ) AS UpcomingSessionCount
       `);
 
@@ -1194,7 +1199,7 @@ app.get('/api/dashboard/teacher/:userId', async (req, res) => {
       .request()
       .input('teacherId', sql.Int, userId)
       .query(`
-        SELECT TOP 8
+        SELECT 
           c.Id,
           c.ClassName,
           c.JoinCode,
@@ -1210,7 +1215,7 @@ app.get('/api/dashboard/teacher/:userId', async (req, res) => {
       .request()
       .input('teacherId', sql.Int, userId)
       .query(`
-        SELECT TOP 8
+        SELECT 
           ep.Id,
           ep.Title,
           ep.Subject,
@@ -1228,7 +1233,7 @@ app.get('/api/dashboard/teacher/:userId', async (req, res) => {
       .request()
       .input('teacherId', sql.Int, userId)
       .query(`
-        SELECT TOP 10
+        SELECT 
           es.Id,
           es.SessionName,
           es.StartTime,
@@ -1365,6 +1370,7 @@ app.post('/api/dashboard/teacher/:userId/exams', async (req, res) => {
       `);
 
     const examPaper = examResult.recordset[0];
+    await syncDocument('exampapers', { id: examPaper.Id, Title: examPaper.Title, DurationInMinutes: examPaper.DurationInMinutes, Subject: examPaper.Subject, IsDraft: examPaper.IsDraft, TeacherId: userId, IsDeleted: 0 }).catch(()=>{});
 
     for (const question of normalizedQuestions) {
       await new sql.Request(transaction)
@@ -1882,6 +1888,7 @@ app.post('/api/dashboard/teacher/:userId/exams/:examId/copy', async (req, res) =
       `);
 
     const newExam = insertExamResult.recordset[0];
+    await syncDocument('exampapers', { id: newExam.Id, Title: newExam.Title, DurationInMinutes: newExam.DurationInMinutes, Subject: newExam.Subject, IsDraft: newExam.IsDraft, TeacherId: userId, IsDeleted: 0 }).catch(()=>{});
 
     await new sql.Request(transaction)
       .input('newExamId', sql.Int, newExam.Id)
@@ -1977,8 +1984,14 @@ app.get('/api/dashboard/teacher/:userId/exams/:examId/export', async (req, res) 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
 
-    const doc = new PDFDocument({ margin: 50 });
+        const doc = new PDFDocument({ margin: 50 });
     doc.pipe(res);
+    try {
+      doc.registerFont('Arial', 'C:\\Windows\\Fonts\\arial.ttf');
+      doc.font('Arial');
+    } catch (e) {
+      console.error('Font Arial not found, fallback to default', e);
+    }
 
     doc.fontSize(20).text(exam.Title || 'Exam Paper', { align: 'center' });
     doc.moveDown(0.5);
@@ -2583,7 +2596,7 @@ app.get('/api/dashboard/teacher/:userId/session-detail/:sessionId', async (req, 
           latestSubmission.SubmittedAt,
           CASE
             WHEN latestSubmission.StartedAt IS NULL THEN NULL
-            WHEN latestSubmission.SubmittedAt IS NULL THEN DATEDIFF(MINUTE, latestSubmission.StartedAt, GETDATE())
+            WHEN latestSubmission.SubmittedAt IS NULL THEN DATEDIFF(MINUTE, latestSubmission.StartedAt, GETUTCDATE())
             ELSE DATEDIFF(MINUTE, latestSubmission.StartedAt, latestSubmission.SubmittedAt)
           END AS DurationInMinutes
         FROM ExamSessions es
@@ -3113,7 +3126,19 @@ app.post('/api/dashboard/teacher/:userId/sessions', async (req, res) => {
             from: process.env.EMAIL_USER || 'Online Exam',
             to: student.Email,
             subject: `[Thông báo] Bài thi mới: ${sessionName}`,
-            text: `Chào ${student.FullName},\n\nGiáo viên vừa tạo một ca thi mới cho lớp học của bạn.\n\nThông tin ca thi:\n- Tên ca thi: ${sessionName}\n- Thời gian bắt đầu: ${formattedStartTime}\n- Thời gian kết thúc: ${formattedEndTime}\n- Thời lượng: ${durationInMinutes} phút\n\nVui lòng đăng nhập vào ứng dụng đúng giờ để tham gia thi.\n\nTrân trọng.`,
+            text: `Chào ${student.FullName},
+
+Giáo viên vừa tạo một ca thi mới cho lớp học của bạn.
+
+Thông tin ca thi:
+- Tên ca thi: ${sessionName}
+- Thời gian bắt đầu: ${formattedStartTime}
+- Thời gian kết thúc: ${formattedEndTime}
+- Thời lượng: ${durationInMinutes} phút
+
+Vui lòng đăng nhập vào ứng dụng đúng giờ để tham gia thi.
+
+Trân trọng.`,
           };
           
           transporter.sendMail(mailOptions).catch(err => console.error('Lỗi gửi email cho học sinh:', err));
@@ -3443,7 +3468,7 @@ app.delete('/api/dashboard/teacher/:userId/sessions/:sessionId', async (req, res
           AND c.TeacherId = @teacherId
           AND c.IsDeleted = 0
           AND es.IsDeleted = 0
-          AND es.StartTime > GETDATE()
+          AND es.StartTime > GETUTCDATE()
       `);
 
     if (deletedResult.recordset.length === 0) {
@@ -3566,7 +3591,8 @@ app.get('/api/dashboard/student/:userId', async (req, res) => {
           (SELECT COUNT(*)
              FROM ExamSessions es
              INNER JOIN ClassroomMembers cm ON cm.ClassroomId = es.ClassroomId
-            WHERE cm.StudentId = @studentId AND es.EndTime >= GETDATE()
+             INNER JOIN Classrooms c ON c.Id = es.ClassroomId
+            WHERE cm.StudentId = @studentId AND es.EndTime >= GETUTCDATE() AND es.IsDeleted = 0 AND c.IsDeleted = 0
           ) AS UpcomingSessionCount
       `);
 
@@ -3601,6 +3627,7 @@ app.get('/api/dashboard/student/:userId', async (req, res) => {
         WHERE cm.StudentId = @studentId
           AND c.IsDeleted = 0
           AND ep.IsDeleted = 0
+          AND es.IsDeleted = 0
         ORDER BY es.StartTime DESC, es.Id DESC
       `);
 
@@ -3722,7 +3749,7 @@ app.post('/api/exam/attempt/start/:sessionId', async (req, res) => {
         .query(`
           INSERT INTO Submissions (ExamSessionId, StudentId, StartedAt, Status)
           OUTPUT INSERTED.*
-          VALUES (@sessionId, @studentId, GETDATE(), 0)
+          VALUES (@sessionId, @studentId, GETUTCDATE(), 0)
         `);
       submission = insertResult.recordset[0];
     } else {
@@ -3830,7 +3857,7 @@ app.post('/api/exam/attempt/submit', async (req, res) => {
       .input('correctCount', sql.Int, correctCount)
       .query(`
         UPDATE Submissions 
-        SET Status = 1, SubmittedAt = GETDATE(), Score = @score, CorrectAnswersCount = @correctCount
+        SET Status = 1, SubmittedAt = GETUTCDATE(), Score = @score, CorrectAnswersCount = @correctCount
         WHERE Id = @attemptId
       `);
     
@@ -3850,7 +3877,7 @@ app.post('/api/exam/attempt/force-submit', async (req, res) => {
       .input('attemptId', sql.Int, attemptId)
       .query(`
         UPDATE Submissions 
-        SET Status = 2, SubmittedAt = GETDATE(), Score = 0, CorrectAnswersCount = 0
+        SET Status = 2, SubmittedAt = GETUTCDATE(), Score = 0, CorrectAnswersCount = 0
         WHERE Id = @attemptId
       `);
     
@@ -3991,6 +4018,337 @@ app.get('/api/public/sessions/access', async (req, res) => {
     });
   } catch (error) {
     return res.status(500).json({ message: error.message });
+  }
+});
+
+
+app.get('/api/dashboard/teacher/:userId/exams/:examId/export-docx', async (req, res) => {
+  try {
+    const userId = Number(req.params.userId);
+    const examId = Number(req.params.examId);
+
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({ message: 'Invalid userId.' });
+    }
+
+    if (!Number.isInteger(examId) || examId <= 0) {
+      return res.status(400).json({ message: 'Invalid examId.' });
+    }
+
+    const pool = await getPool();
+
+    const examResult = await pool
+      .request()
+      .input('teacherId', sql.Int, userId)
+      .input('examId', sql.Int, examId)
+      .query(`
+        SELECT TOP 1
+          ep.Id,
+          ep.Title,
+          ep.Subject,
+          ep.DurationInMinutes,
+          ep.CreatedAt,
+          ep.IsDraft
+        FROM ExamPapers ep
+        WHERE ep.Id = @examId AND ep.TeacherId = @teacherId AND ep.IsDeleted = 0
+      `);
+
+    if (examResult.recordset.length === 0) {
+      return res.status(404).json({ message: 'Exam paper not found or not owned by teacher.' });
+    }
+
+    const questionsResult = await pool
+      .request()
+      .input('examId', sql.Int, examId)
+      .query(`
+        SELECT
+          q.Id,
+          q.Content,
+          q.OptionA,
+          q.OptionB,
+          q.OptionC,
+          q.OptionD,
+          q.CorrectOption
+        FROM Questions q
+        WHERE q.ExamPaperId = @examId
+        ORDER BY q.Id ASC
+      `);
+
+    const exam = examResult.recordset[0];
+    const questions = questionsResult.recordset;
+
+    const paragraphs = [];
+    paragraphs.push(
+      new Paragraph({
+        text: exam.Title || 'Exam Paper',
+        heading: HeadingLevel.HEADING_1,
+        spacing: { after: 200 },
+      })
+    );
+
+    paragraphs.push(
+      new Paragraph({
+        children: [new TextRun(`Subject: ${exam.Subject || '--'}`)],
+      })
+    );
+    paragraphs.push(
+      new Paragraph({
+        children: [new TextRun(`Duration: ${exam.DurationInMinutes || 0} minutes`)],
+      })
+    );
+    paragraphs.push(
+      new Paragraph({
+        children: [new TextRun(`Status: ${exam.IsDraft ? 'Draft' : 'Published'}`)],
+        spacing: { after: 200 },
+      })
+    );
+
+    questions.forEach((q, index) => {
+      paragraphs.push(
+        new Paragraph({
+          children: [new TextRun(`${index + 1}. ${q.Content || ''}`)],
+          spacing: { after: 120 },
+        })
+      );
+      paragraphs.push(new Paragraph({ text: `A. ${q.OptionA || ''}` }));
+      paragraphs.push(new Paragraph({ text: `B. ${q.OptionB || ''}` }));
+      paragraphs.push(new Paragraph({ text: `C. ${q.OptionC || ''}` }));
+      paragraphs.push(new Paragraph({ text: `D. ${q.OptionD || ''}` }));
+      paragraphs.push(
+        new Paragraph({
+          children: [new TextRun(`Correct: ${q.CorrectOption || '--'}`)],
+          spacing: { after: 200 },
+        })
+      );
+    });
+
+    const doc = new Document({
+      sections: [
+        {
+          properties: {},
+          children: paragraphs,
+        },
+      ],
+    });
+
+    const buffer = await Packer.toBuffer(doc);
+    const filename = `exam-${exam.Id}.docx`;
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(buffer);
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+
+// ==========================================
+// USER PROFILE & PASSWORD
+// ==========================================
+app.put('/api/users/:userId/profile', async (req, res) => {
+  try {
+    const userId = Number(req.params.userId);
+    const { fullName } = req.body; // ONLY allow updating fullName as per requirements
+
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({ message: 'Invalid User ID.' });
+    }
+
+    if (!fullName || !fullName.trim()) {
+      return res.status(400).json({ message: 'Tên hiển thị không được để trống.' });
+    }
+
+    const pool = await getPool();
+    
+    // Check if user exists
+    const userCheck = await pool.request()
+      .input('userId', sql.Int, userId)
+      .query('SELECT Id FROM Users WHERE Id = @userId');
+      
+    if (userCheck.recordset.length === 0) {
+      return res.status(404).json({ message: 'Không tìm thấy người dùng.' });
+    }
+
+    // Update FullName
+    await pool.request()
+      .input('userId', sql.Int, userId)
+      .input('fullName', sql.NVarChar(255), fullName.trim())
+      .query('UPDATE Users SET FullName = @fullName WHERE Id = @userId');
+      
+    // Fetch updated user to return
+    const updatedUser = await pool.request()
+      .input('userId', sql.Int, userId)
+      .query('SELECT Id, FullName, Email, Role, IsActive FROM Users WHERE Id = @userId');
+
+    return res.json({ 
+      message: 'Cập nhật thông tin thành công.', 
+      user: {
+        id: updatedUser.recordset[0].Id,
+        fullName: updatedUser.recordset[0].FullName,
+        email: updatedUser.recordset[0].Email,
+        role: updatedUser.recordset[0].Role
+      } 
+    });
+  } catch (error) {
+    console.error('Update profile error:', error);
+    return res.status(500).json({ message: 'Lỗi máy chủ nội bộ.' });
+  }
+});
+
+app.put('/api/users/:userId/password', async (req, res) => {
+  try {
+    const userId = Number(req.params.userId);
+    const { currentPassword, newPassword } = req.body;
+
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({ message: 'Invalid User ID.' });
+    }
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ message: 'Vui lòng nhập đầy đủ mật khẩu cũ và mới.' });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({ message: 'Mật khẩu mới phải có ít nhất 6 ký tự.' });
+    }
+
+    const pool = await getPool();
+    
+    // Check if user exists and get password hash
+    const userCheck = await pool.request()
+      .input('userId', sql.Int, userId)
+      .query('SELECT PasswordHash FROM Users WHERE Id = @userId');
+      
+    if (userCheck.recordset.length === 0) {
+      return res.status(404).json({ message: 'Không tìm thấy người dùng.' });
+    }
+    
+    const dbPasswordHash = userCheck.recordset[0].PasswordHash;
+    
+    // Compare current password
+    const isMatch = await bcrypt.compare(currentPassword, dbPasswordHash);
+    if (!isMatch) {
+      return res.status(400).json({ message: 'Mật khẩu hiện tại không chính xác.' });
+    }
+
+    // Hash new password
+    const newPasswordHash = await bcrypt.hash(newPassword, 10);
+
+    // Update password
+    await pool.request()
+      .input('userId', sql.Int, userId)
+      .input('passwordHash', sql.VarChar(255), newPasswordHash)
+      .query('UPDATE Users SET PasswordHash = @passwordHash WHERE Id = @userId');
+
+    return res.json({ message: 'Đổi mật khẩu thành công.' });
+  } catch (error) {
+    console.error('Change password error:', error);
+    return res.status(500).json({ message: 'Lỗi máy chủ nội bộ.' });
+  }
+});
+
+// GET Student Results
+app.get('/api/exam/student/results/:userId', async (req, res) => {
+  try {
+    const userId = Number(req.params.userId);
+    const pool = await getPool();
+    const results = await pool.request()
+      .input('userId', sql.Int, userId)
+      .query(`
+        SELECT 
+          s.Id AS AttemptId,
+          es.Id AS ExamSessionId,
+          s.Status,
+          s.Score,
+          s.CorrectAnswersCount,
+          ep.Title AS ExamTitle,
+          es.SessionName,
+          c.ClassName,
+          (SELECT COUNT(*) FROM Questions WHERE ExamPaperId = ep.Id) AS TotalQuestions,
+          s.SubmittedAt
+        FROM Submissions s
+        INNER JOIN ExamSessions es ON s.ExamSessionId = es.Id
+        INNER JOIN ExamPapers ep ON es.ExamPaperId = ep.Id
+        INNER JOIN Classrooms c ON es.ClassroomId = c.Id
+        WHERE s.StudentId = @userId AND s.Status IN (1, 2)
+          AND es.IsDeleted = 0 AND ep.IsDeleted = 0 AND c.IsDeleted = 0
+        ORDER BY s.SubmittedAt DESC
+      `);
+    res.json(results.recordset);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// GET Result Detail
+app.get('/api/exam/results/:attemptId/detail', async (req, res) => {
+  try {
+    const attemptId = Number(req.params.attemptId);
+    const pool = await getPool();
+    
+    // Get basic submission info
+    const subResult = await pool.request()
+      .input('attemptId', sql.Int, attemptId)
+      .query(`
+        SELECT s.Score, s.CorrectAnswersCount, es.AllowViewExplanation,
+               es.IsShuffled, es.ShuffleQuestions, es.ShuffleAnswers,
+               (SELECT COUNT(*) FROM Questions WHERE ExamPaperId = es.ExamPaperId) as TotalQuestions
+        FROM Submissions s
+        INNER JOIN ExamSessions es ON s.ExamSessionId = es.Id
+        WHERE s.Id = @attemptId
+      `);
+      
+    if (subResult.recordset.length === 0) return res.status(404).json({ message: 'Not found' });
+    const sub = subResult.recordset[0];
+    
+    // Get questions and answers
+    const qResult = await pool.request()
+      .input('attemptId', sql.Int, attemptId)
+      .query(`
+        SELECT 
+          q.Id as id,
+          q.Content as content,
+          q.OptionA as optionA,
+          q.OptionB as optionB,
+          q.OptionC as optionC,
+          q.OptionD as optionD,
+          q.CorrectOption as correctAnswer,
+          q.Explanation as explanation,
+          sd.SelectedOption as studentAnswer
+        FROM Questions q
+        INNER JOIN ExamSessions es ON q.ExamPaperId = es.ExamPaperId
+        INNER JOIN Submissions s ON s.ExamSessionId = es.Id
+        LEFT JOIN SubmissionDetails sd ON sd.SubmissionId = s.Id AND sd.QuestionId = q.Id
+        WHERE s.Id = @attemptId
+        ORDER BY q.Id ASC
+      `);
+      
+    const questions = qResult.recordset.map(q => ({
+      id: q.id,
+      content: q.content,
+      optionA: q.optionA,
+      optionB: q.optionB,
+      optionC: q.optionC,
+      optionD: q.optionD,
+      correctOption: q.correctAnswer,
+      selectedOption: q.studentAnswer,
+      isCorrect: q.correctAnswer === q.studentAnswer,
+      explanation: q.explanation
+    }));
+    
+    res.json({
+      score: sub.Score,
+      correctCount: sub.CorrectAnswersCount,
+      totalQuestions: sub.TotalQuestions,
+      allowViewExplanation: sub.AllowViewExplanation,
+      isShuffled: sub.IsShuffled,
+      shuffleQuestions: sub.ShuffleQuestions,
+      shuffleAnswers: sub.ShuffleAnswers,
+      questions
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
   }
 });
 

@@ -125,7 +125,7 @@ const ClassScreen = ({ route, navigation }) => {
           const res = await globalSearch('classrooms', searchText.trim(), user?.id);
           setClassrooms(res.results || []);
           if (res.fallback) {
-            showToast('Meilisearch không hoạt động. Đang dùng tìm kiếm thường.', 'warning');
+            
           }
         } catch (err) {
           console.error('Search error:', err);
@@ -684,3 +684,4 @@ const ClassScreen = ({ route, navigation }) => {
 };
 
 export default ClassScreen;
+

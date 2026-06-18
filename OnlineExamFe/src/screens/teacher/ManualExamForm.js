@@ -32,6 +32,7 @@ const ManualExamForm = ({ navigation, route }) => {
   const insets = useSafeAreaInsets();
   const user = route?.params?.user?.id ? route?.params?.user : loadAuthSession();
   const questions = Array.isArray(route?.params?.questions) ? route.params.questions : [];
+  const isAI = Boolean(route?.params?.isAI);
   const [title, setTitle] = useState('');
   const [subject, setSubject] = useState('');
   const [duration, setDuration] = useState('');
@@ -129,7 +130,7 @@ const ManualExamForm = ({ navigation, route }) => {
           <MaterialIcons name="arrow-back" size={20} color={COLORS.primary} />
         </TouchableOpacity>
         <View style={styles.headerTitleContainer}>
-          <Text style={styles.headerTitle}>Tạo đề thi thủ công</Text>
+          <Text style={styles.headerTitle}>{isAI ? 'Tạo đề thi bằng AI' : 'Tạo đề thi thủ công'}</Text>
           <Text style={styles.headerSubtitle}>Thông tin cơ bản</Text>
         </View>
       </View>

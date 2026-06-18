@@ -141,6 +141,7 @@ const TeacherDashboardScreen = ({ route, navigation }) => {
   const [searchText, setSearchText] = useState('');
   const [activeTab, setActiveTab] = useState(getStartingTab());
   const [loading, setLoading] = useState(true);
+  const [searchLoading, setSearchLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [teacher, setTeacher] = useState(null);
@@ -665,7 +666,7 @@ const TeacherDashboardScreen = ({ route, navigation }) => {
         }
       } else {
         try {
-          setLoading(true);
+          setSearchLoading(true);
           const [resC, resE, resS] = await Promise.all([
             globalSearch('classrooms', searchText.trim(), user?.id),
             globalSearch('exampapers', searchText.trim(), user?.id),
@@ -676,12 +677,12 @@ const TeacherDashboardScreen = ({ route, navigation }) => {
           setSessions(resS.results || []);
           
           if (resC.fallback || resE.fallback || resS.fallback) {
-            showToast('Meilisearch không hoạt động. Đang dùng tìm kiếm thường.', 'warning');
+            
           }
         } catch (err) {
           console.error('Search error:', err);
         } finally {
-          setLoading(false);
+          setSearchLoading(false);
         }
       }
     }, 500);
@@ -798,7 +799,11 @@ const TeacherDashboardScreen = ({ route, navigation }) => {
           </TouchableOpacity>
         </View>
 
-        {filteredExamPapers.length > 0 ? (
+        {searchLoading ? (
+          <View style={{ alignItems: 'center', paddingVertical: 32 }}>
+            <ActivityIndicator size="small" color="#005bbf" />
+          </View>
+        ) : filteredExamPapers.length > 0 ? (
           filteredExamPapers.map((item) => (
             <TouchableOpacity
               key={item.Id}
@@ -1337,7 +1342,7 @@ const TeacherDashboardScreen = ({ route, navigation }) => {
                     <MaterialIcons name="expand-more" size={20} color="#727785" />
                   </TouchableOpacity>
                   <View className="mt-2 flex-row flex-wrap gap-2">
-                    {editSessionOptions.examPapers.slice(0, 8).map((item) => (
+                    {editSessionOptions.examPapers.map((item) => (
                       <TouchableOpacity
                         key={item.Id}
                         className="px-3 py-2 rounded-xl"
@@ -1372,7 +1377,7 @@ const TeacherDashboardScreen = ({ route, navigation }) => {
                     <MaterialIcons name="expand-more" size={20} color="#727785" />
                   </TouchableOpacity>
                   <View className="mt-2 flex-row flex-wrap gap-2">
-                    {editSessionOptions.classrooms.slice(0, 8).map((item) => (
+                    {editSessionOptions.classrooms.map((item) => (
                       <TouchableOpacity
                         key={item.Id}
                         className="px-3 py-2 rounded-xl"
@@ -1556,3 +1561,4 @@ const stylesExam = StyleSheet.create({
 });
 
 export default TeacherDashboardScreen;
+
